@@ -1,146 +1,118 @@
 <script>
 document.addEventListener("DOMContentLoaded", function() {
 
-  // -------- DATOS (CON GUARDADO) --------
-  let partidos = JSON.parse(localStorage.getItem('partidos')) || [
-    { id:1, local:'Aldosivi', visitante:'Estudiantes RC', hora:'13:30', comp:'LPF', zona:'Zona B' },
-    { id:2, local:'Independiente', visitante:'Racing Club', hora:'17:30', comp:'LPF', zona:'Interzonal' },
-    { id:3, local:'Rosario Central', visitante:'Atlético Tucumán', hora:'21:00', comp:'LPF', zona:'Zona B' }
-  ];
+  console.log("APP OK");
 
-  let tablas = JSON.parse(localStorage.getItem('tablas')) || [
-    { id:1, nombre:'Zona A', equipos:[ {id:1,nombre:'EFI',pts:23}, {id:2,nombre:'efur',pts:18} ] },
-    { id:2, nombre:'Zona B', equipos:[ {id:3,nombre:'Los Tigres',pts:15}, {id:4,nombre:'Central FC',pts:12} ] }
-  ];
+  // -------- DATOS --------
+  let partidos = JSON.parse(localStorage.getItem('partidos')) || [];
+  let tablas = JSON.parse(localStorage.getItem('tablas')) || [];
 
-  let editPId=null, editTablaId=null, editEId=null, renameTablaId=null, nextId=50;
+  let nextId = 1;
 
   function guardarDatos(){
     localStorage.setItem('partidos', JSON.stringify(partidos));
     localStorage.setItem('tablas', JSON.stringify(tablas));
   }
 
-  // -------- FECHA --------
+  // -------- FECHA (SIN ERROR) --------
   const fecha = document.getElementById('fecha-hoy');
   if (fecha) {
     fecha.textContent = new Date().toLocaleDateString('es-AR',{
-      weekday:'long',year:'numeric',month:'long',day:'numeric'
+      weekday:'long',
+      year:'numeric',
+      month:'long',
+      day:'numeric'
     });
   }
 
-  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
-  function cerrar(id){ document.getElementById(id)?.classList.remove('active'); }
-  function abrir(id){ document.getElementById(id)?.classList.add('active'); }
-
   // -------- RENDER PARTIDOS --------
   function renderPartidos(){
-    const c=document.getElementById('partidos-container');
-    if(!c) return;
+    const c = document.getElementById('partidos-container');
+    if (!c) return;
 
-    if(!partidos.length){
-      c.innerHTML=`<div class="empty">Sin partidos</div>`;
+    if (partidos.length === 0){
+      c.innerHTML = "Sin partidos";
       return;
     }
 
-    let html='';
-    partidos.forEach(p=>{
-      html+=`<div class="match-card">
+    c.innerHTML = partidos.map(p => `
+      <div>
         ${p.local} vs ${p.visitante} (${p.hora})
         <button onclick="eliminarPartido(${p.id})">X</button>
-      </div>`;
-    });
-
-    c.innerHTML=html;
+      </div>
+    `).join("");
   }
 
   // -------- RENDER TABLAS --------
   function renderTablas(){
-    const c=document.getElementById('tablas-container');
-    if(!c) return;
+    const c = document.getElementById('tablas-container');
+    if (!c) return;
 
-    if(!tablas.length){
-      c.innerHTML=`<div class="empty">Sin tablas</div>`;
+    if (tablas.length === 0){
+      c.innerHTML = "Sin tablas";
       return;
     }
 
-    let html='';
-    tablas.forEach(t=>{
-      html+=`<div><b>${t.nombre}</b><br>`;
-      t.equipos.forEach(e=>{
-        html+=`${e.nombre} (${e.pts})
-        <button onclick="eliminarEquipo(${t.id},${e.id})">X</button><br>`;
-      });
-      html+='</div><br>';
-    });
-
-    c.innerHTML=html;
+    c.innerHTML = tablas.map(t => `
+      <div>
+        <b>${t.nombre}</b><br>
+        ${(t.equipos || []).map(e => `
+          ${e.nombre} (${e.pts})
+          <button onclick="eliminarEquipo(${t.id},${e.id})">X</button>
+        `).join("<br>")}
+      </div><br>
+    `).join("");
   }
 
-  // -------- PARTIDOS --------
+  // -------- FUNCIONES GLOBALES --------
   window.guardarPartido = function(){
-    const local=document.getElementById('f-local')?.value;
-    const visitante=document.getElementById('f-visitante')?.value;
-    if(!local||!visitante) return;
+    const local = document.getElementById('f-local')?.value;
+    const visitante = document.getElementById('f-visitante')?.value;
+    const hora = document.getElementById('f-hora')?.value || "20:00";
 
-    partidos.push({
-      id:nextId++,
-      local,
-      visitante,
-      hora:document.getElementById('f-hora')?.value || "20:00",
-      comp:'LPF',
-      zona:''
-    });
+    if (!local || !visitante) return;
 
-    renderPartidos();
+    partidos.push({ id: nextId++, local, visitante, hora });
     guardarDatos();
+    renderPartidos();
   }
 
   window.eliminarPartido = function(id){
-    partidos = partidos.filter(p=>p.id!==id);
+    partidos = partidos.filter(p => p.id !== id);
+    guardarDatos();
     renderPartidos();
-    guardarDatos();
   }
 
-  // -------- TABLAS --------
   window.guardarNuevaTabla = function(){
-    const nombre=document.getElementById('nt-nombre')?.value;
-    if(!nombre) return;
+    const nombre = document.getElementById('nt-nombre')?.value;
+    if (!nombre) return;
 
-    tablas.push({id:nextId++, nombre, equipos:[]});
-    renderTablas();
+    tablas.push({ id: nextId++, nombre, equipos: [] });
     guardarDatos();
+    renderTablas();
   }
 
-  window.eliminarTabla = function(id){
-    tablas = tablas.filter(t=>t.id!==id);
-    renderTablas();
-    guardarDatos();
-  }
-
-  // -------- EQUIPOS --------
   window.guardarEquipo = function(){
-    const nombre=document.getElementById('t-nombre')?.value;
-    const pts=parseInt(document.getElementById('t-pts')?.value)||0;
-    if(!nombre) return;
+    const nombre = document.getElementById('t-nombre')?.value;
+    const pts = parseInt(document.getElementById('t-pts')?.value) || 0;
 
-    if(!tablas.length) return;
+    if (!nombre || tablas.length === 0) return;
 
-    tablas[0].equipos.push({id:nextId++, nombre, pts});
-    renderTablas();
+    tablas[0].equipos.push({ id: nextId++, nombre, pts });
     guardarDatos();
+    renderTablas();
   }
 
-  window.eliminarEquipo = function(tablaId,equipoId){
-    const t=tablas.find(t=>t.id===tablaId);
-    if(!t) return;
+  window.eliminarEquipo = function(tablaId, equipoId){
+    const t = tablas.find(t => t.id === tablaId);
+    if (!t) return;
 
-    t.equipos = t.equipos.filter(e=>e.id!==equipoId);
-    renderTablas();
+    t.equipos = t.equipos.filter(e => e.id !== equipoId);
     guardarDatos();
+    renderTablas();
   }
 
-  // -------- INIT --------
+  // -------- INICIO --------
   renderPartidos();
   renderTablas();
 
