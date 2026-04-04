@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Partidos de Hoy — Fútbol</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -12,13 +13,41 @@
     --border: rgba(0,0,0,0.1); --border-hover: rgba(0,0,0,0.22); --accent: #111110;
     --badge-bg: #efefeb; --radius: 14px; --input-bg: #f0efe9;
     --gold: #c9a84c; --silver: #8e9aaa; --bronze: #b07d52;
+    --teal: #0d9488;
   }
   body { background: var(--bg); color: var(--text); font-family: 'Barlow', sans-serif; min-height: 100vh; padding: 2rem 1rem; }
   .container { max-width: 680px; margin: 0 auto; }
 
-  .header { margin-bottom: 2rem; }
+  /* LOGIN */
+  #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+  .login-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; width: 100%; max-width: 380px; }
+  .login-logo { font-family: 'Bebas Neue', sans-serif; font-size: 32px; letter-spacing: 3px; margin-bottom: 6px; }
+  .login-sub { font-size: 13px; color: var(--muted); margin-bottom: 1.8rem; }
+  .lfield { margin-bottom: 14px; }
+  .lfield label { display: block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 4px; }
+  .lfield input { width: 100%; padding: 11px 14px; border: 1.5px solid var(--border); border-radius: 10px; background: var(--input-bg); color: var(--text); font-family: 'Barlow', sans-serif; font-size: 15px; outline: none; transition: border-color 0.15s; }
+  .lfield input:focus { border-color: var(--teal); }
+  .pwd-wrap { position: relative; }
+  .pwd-wrap input { padding-right: 44px; }
+  .pwd-toggle { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; color: var(--muted); font-size: 18px; padding: 4px; }
+  .login-btn { width: 100%; padding: 12px; background: var(--teal); color: #fff; border: none; border-radius: 10px; font-family: 'Barlow', sans-serif; font-size: 16px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: opacity 0.15s; }
+  .login-btn:hover { opacity: 0.88; }
+  .login-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .login-msg { font-size: 13px; margin-top: 10px; text-align: center; min-height: 18px; }
+  .login-msg.err { color: #c0392b; }
+  .login-msg.ok  { color: var(--teal); }
+  .login-switch { text-align: center; margin-top: 14px; font-size: 13px; color: var(--muted); }
+  .login-switch a { color: var(--teal); cursor: pointer; font-weight: 600; }
+  .forgot { text-align: center; margin-top: 10px; }
+  .forgot a { font-size: 13px; color: var(--teal); cursor: pointer; }
+
+  /* APP */
+  #app-screen { display: none; }
+  .header { margin-bottom: 2rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .header-title { font-family: 'Bebas Neue', sans-serif; font-size: 48px; letter-spacing: 3px; line-height: 1; }
   .header-date { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 4px; }
+  .logout-btn { font-size: 12px; font-weight: 600; padding: 6px 14px; border-radius: 20px; border: 1.5px solid var(--border-hover); background: transparent; color: var(--muted); cursor: pointer; font-family: 'Barlow', sans-serif; transition: background 0.12s; margin-top: 8px; }
+  .logout-btn:hover { background: var(--badge-bg); color: var(--text); }
 
   .toolbar { display: flex; gap: 10px; margin-bottom: 1.5rem; flex-wrap: wrap; }
   .btn { font-family: 'Barlow', sans-serif; font-size: 13px; font-weight: 600; padding: 8px 16px; border-radius: 30px; border: 1.5px solid var(--border-hover); background: var(--card); color: var(--text); cursor: pointer; transition: background 0.15s, transform 0.1s; }
@@ -30,7 +59,6 @@
   .section { margin-bottom: 1.5rem; }
   .section-label { font-size: 10px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--hint); padding-left: 2px; margin-bottom: 8px; }
 
-  /* MATCH CARD */
   .match-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 8px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; transition: border-color 0.15s, box-shadow 0.15s; animation: fadeIn 0.3s ease both; }
   .match-card:hover { border-color: var(--border-hover); box-shadow: 0 2px 12px rgba(0,0,0,0.06); }
   @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
@@ -49,11 +77,7 @@
   .card-btn.del:hover { background: #ffe0de; }
 
   .divider { border: none; border-top: 2px solid var(--border); margin: 2rem 0; }
-
-  /* TABLAS */
-  .tablas-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.2rem; flex-wrap: wrap; gap: 8px; }
-  .tablas-title { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 2px; }
-
+  .tablas-title { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 2px; margin-bottom: 1.2rem; }
   .tabla-block { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1.2rem; overflow: hidden; animation: fadeIn 0.3s ease both; }
   .tabla-block-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 8px; flex-wrap: wrap; }
   .tabla-block-name { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 1.5px; }
@@ -86,7 +110,6 @@
   .tb-btn.del { border-color: #e0b0ab; color: #c0392b; }
   .tb-btn.del:hover { background: #ffe0de; }
 
-  /* MODAL */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; padding: 1rem; }
   .overlay.active { display: flex; }
   .modal { background: var(--card); border-radius: var(--radius); padding: 1.5rem; width: 100%; max-width: 460px; border: 1px solid var(--border); animation: slideUp 0.2s ease; }
@@ -101,9 +124,9 @@
 
   .empty { text-align: center; padding: 2rem 1rem; color: var(--hint); font-size: 14px; border: 1.5px dashed var(--border); border-radius: var(--radius); }
   .empty span { display: block; font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: 2px; color: var(--border-hover); margin-bottom: 6px; }
-
-  /* SELECT estilo */
-  select option { background: #fff; color: #111; }
+  .loading { text-align: center; padding: 3rem; color: var(--muted); font-size: 14px; }
+  .loading span { display: block; font-family: 'Bebas Neue', sans-serif; font-size: 24px; letter-spacing: 2px; margin-bottom: 6px; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
   @media (max-width: 480px) {
     .header-title { font-size: 36px; }
@@ -116,32 +139,66 @@
 </style>
 </head>
 <body>
-<div class="container">
 
-  <div class="header">
-    <div class="header-title">⚽ Partidos de hoy</div>
-    <div class="header-date" id="fecha-hoy"></div>
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">⚽ Fútbol</div>
+    <div class="login-sub">Iniciá sesión para gestionar tus partidos</div>
+
+    <div id="login-form">
+      <div class="lfield"><label>Email</label><input id="l-email" type="email" placeholder="tu@email.com"></div>
+      <div class="lfield">
+        <label>Contraseña</label>
+        <div class="pwd-wrap">
+          <input id="l-pwd" type="password" placeholder="••••••••">
+          <button class="pwd-toggle" onclick="togglePwd('l-pwd',this)" type="button">👁</button>
+        </div>
+      </div>
+      <button class="login-btn" id="btn-login" onclick="iniciarSesion()">Iniciar sesión</button>
+      <div class="forgot"><a onclick="olvidePwd()">¿Olvidó su contraseña?</a></div>
+      <div class="login-msg err" id="login-err"></div>
+      <div class="login-switch">¿No tenés cuenta? <a onclick="mostrarRegistro()">Registrate</a></div>
+    </div>
+
+    <div id="registro-form" style="display:none">
+      <div class="lfield"><label>Email</label><input id="r-email" type="email" placeholder="tu@email.com"></div>
+      <div class="lfield">
+        <label>Contraseña</label>
+        <div class="pwd-wrap">
+          <input id="r-pwd" type="password" placeholder="Mínimo 6 caracteres">
+          <button class="pwd-toggle" onclick="togglePwd('r-pwd',this)" type="button">👁</button>
+        </div>
+      </div>
+      <button class="login-btn" onclick="registrarse()">Crear cuenta</button>
+      <div class="login-msg err" id="reg-err"></div>
+      <div class="login-switch">¿Ya tenés cuenta? <a onclick="mostrarLogin()">Iniciá sesión</a></div>
+    </div>
   </div>
+</div>
 
-  <!-- TOOLBAR GLOBAL -->
-  <div class="toolbar">
-    <button class="btn primary" onclick="abrirModalPartido()">+ Partido</button>
-    <button class="btn primary" onclick="abrirModalNuevaTabla()">+ Nueva tabla</button>
-    <button class="btn primary" onclick="abrirModalEquipo()">+ Equipo a tabla</button>
-    <button class="btn" onclick="exportarHTML()">Descargar HTML</button>
-  </div>
+<!-- APP -->
+<div id="app-screen">
+  <div class="container">
+    <div class="header">
+      <div>
+        <div class="header-title">⚽ Partidos de hoy</div>
+        <div class="header-date" id="fecha-hoy"></div>
+      </div>
+      <button class="logout-btn" onclick="cerrarSesion()">Cerrar sesión</button>
+    </div>
 
-  <!-- PARTIDOS -->
-  <div id="partidos-container"></div>
+    <div class="toolbar">
+      <button class="btn primary" onclick="abrirModalPartido()">+ Partido</button>
+      <button class="btn primary" onclick="abrirModalNuevaTabla()">+ Nueva tabla</button>
+      <button class="btn primary" onclick="abrirModalEquipo()">+ Equipo a tabla</button>
+    </div>
 
-  <hr class="divider">
-
-  <!-- TABLAS -->
-  <div class="tablas-header">
+    <div id="partidos-container"><div class="loading"><span>Cargando...</span></div></div>
+    <hr class="divider">
     <div class="tablas-title">Tablas de posiciones</div>
+    <div id="tablas-container"><div class="loading"><span>Cargando...</span></div></div>
   </div>
-  <div id="tablas-container"></div>
-
 </div>
 
 <!-- MODAL PARTIDO -->
@@ -168,7 +225,7 @@
 <div class="overlay" id="overlay-nueva-tabla">
   <div class="modal">
     <h2>Nueva tabla</h2>
-    <div class="field"><label>Nombre de la tabla</label><input id="nt-nombre" type="text" placeholder="Ej: Zona A, Liga local, Grupo 1..."></div>
+    <div class="field"><label>Nombre de la tabla</label><input id="nt-nombre" type="text" placeholder="Ej: Zona A, Liga local..."></div>
     <div class="modal-actions">
       <button class="btn" onclick="cerrar('overlay-nueva-tabla')">Cancelar</button>
       <button class="btn primary" onclick="guardarNuevaTabla()">Crear tabla</button>
@@ -176,7 +233,7 @@
   </div>
 </div>
 
-<!-- MODAL RENOMBRAR TABLA -->
+<!-- MODAL RENOMBRAR -->
 <div class="overlay" id="overlay-rename-tabla">
   <div class="modal">
     <h2>Renombrar tabla</h2>
@@ -188,14 +245,11 @@
   </div>
 </div>
 
-<!-- MODAL EQUIPO (GLOBAL con selector de tabla) -->
+<!-- MODAL EQUIPO -->
 <div class="overlay" id="overlay-equipo">
   <div class="modal">
     <h2 id="me-title">Agregar equipo a tabla</h2>
-    <div class="field">
-      <label>¿A qué tabla?</label>
-      <select id="t-tabla"></select>
-    </div>
+    <div class="field"><label>¿A qué tabla?</label><select id="t-tabla"></select></div>
     <div class="field"><label>Nombre del equipo</label><input id="t-nombre" type="text" placeholder="Ej: EFI"></div>
     <div class="field"><label>Puntos</label><input id="t-pts" type="number" min="0" placeholder="Ej: 23"></div>
     <div class="modal-actions">
@@ -206,189 +260,298 @@
 </div>
 
 <script>
-  let partidos = [
-    { id:1, local:'Aldosivi', visitante:'Estudiantes RC', hora:'13:30', comp:'LPF', zona:'Zona B' },
-    { id:2, local:'Independiente', visitante:'Racing Club', hora:'17:30', comp:'LPF', zona:'Interzonal' },
-    { id:3, local:'Rosario Central', visitante:'Atlético Tucumán', hora:'21:00', comp:'LPF', zona:'Zona B' }
-  ];
-  let tablas = [
-    { id:1, nombre:'Zona A', equipos:[ {id:1,nombre:'EFI',pts:23}, {id:2,nombre:'efur',pts:18} ] },
-    { id:2, nombre:'Zona B', equipos:[ {id:3,nombre:'Los Tigres',pts:15}, {id:4,nombre:'Central FC',pts:12} ] }
-  ];
-  let editPId=null, editTablaId=null, editEId=null, renameTablaId=null, nextId=50;
+const SUPABASE_URL  = 'https://jzagaemzitudabeuufsv.supabase.co'
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6YWdhZW16aXR1ZGFiZXV1ZnN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzMzQxMDQsImV4cCI6MjA5MDkxMDEwNH0.iWXDZzevNemvRhT3nMi73TefgesNlekj9onrRCEhQJI'
 
-  document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+const { createClient } = supabase
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
 
-  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+let userId = null
+let editPId = null, editTablaId = null, editEId = null, renameTablaId = null
+let tablasCache = []
+let partidosCache = []
 
-  function cerrar(id){ document.getElementById(id).classList.remove('active'); }
-  function abrir(id){ document.getElementById(id).classList.add('active'); }
+document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})
 
-  // ---- RENDER PARTIDOS ----
-  function renderPartidos(){
-    const c=document.getElementById('partidos-container');
-    if(!partidos.length){ c.innerHTML=`<div class="empty"><span>Sin partidos</span>Usá "+ Partido" para agregar.</div>`; return; }
-    const grupos={};
-    partidos.forEach(p=>{ const k=p.comp||'Sin comp'; if(!grupos[k]) grupos[k]=[]; grupos[k].push(p); });
-    let html='';
-    for(const [comp,items] of Object.entries(grupos)){
-      items.sort((a,b)=>a.hora.localeCompare(b.hora));
-      html+=`<div class="section"><div class="section-label">${esc(comp)}</div>`;
-      items.forEach(p=>{
-        html+=`<div class="match-card">
-          <div class="team"><div class="team-name">${esc(p.local)}</div><div class="team-sub">Local${p.zona?' · '+esc(p.zona):''}</div></div>
-          <div class="mid"><div class="hora-badge">${esc(p.hora)}</div><div class="vs-text">vs</div><div class="comp-badge">${esc(p.comp)}</div></div>
-          <div class="team right"><div class="team-name">${esc(p.visitante)}</div><div class="team-sub">Visitante${p.zona?' · '+esc(p.zona):''}</div></div>
-          <div class="card-actions">
-            <button class="card-btn" onclick="abrirModalPartido(${p.id})">✏️ Editar</button>
-            <button class="card-btn del" onclick="eliminarPartido(${p.id})">🗑 Eliminar</button>
-          </div>
-        </div>`;
-      });
-      html+=`</div>`;
-    }
-    c.innerHTML=html;
+// ---- AUTH ----
+function togglePwd(inputId, btn) {
+  const inp = document.getElementById(inputId)
+  inp.type = inp.type === 'password' ? 'text' : 'password'
+  btn.textContent = inp.type === 'password' ? '👁' : '🙈'
+}
+function mostrarRegistro() { document.getElementById('login-form').style.display='none'; document.getElementById('registro-form').style.display=''; }
+function mostrarLogin()    { document.getElementById('registro-form').style.display='none'; document.getElementById('login-form').style.display=''; }
+
+async function iniciarSesion() {
+  const email = document.getElementById('l-email').value.trim()
+  const pwd   = document.getElementById('l-pwd').value
+  const err   = document.getElementById('login-err')
+  err.textContent = ''
+  if (!email || !pwd) { err.textContent = 'Completá email y contraseña.'; return; }
+  const btn = document.getElementById('btn-login')
+  btn.disabled = true; btn.textContent = 'Ingresando...'
+  const { error } = await sb.auth.signInWithPassword({ email, password: pwd })
+  btn.disabled = false; btn.textContent = 'Iniciar sesión'
+  if (error) { err.textContent = 'Email o contraseña incorrectos.'; }
+}
+
+async function registrarse() {
+  const email = document.getElementById('r-email').value.trim()
+  const pwd   = document.getElementById('r-pwd').value
+  const err   = document.getElementById('reg-err')
+  err.className = 'login-msg err'; err.textContent = ''
+  if (pwd.length < 6) { err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
+  const { error } = await sb.auth.signUp({ email, password: pwd })
+  if (error) { err.textContent = error.message; return; }
+  err.className = 'login-msg ok'
+  err.textContent = '¡Cuenta creada! Revisá tu email para confirmar.'
+}
+
+async function olvidePwd() {
+  const email = document.getElementById('l-email').value.trim()
+  const err = document.getElementById('login-err')
+  if (!email) { err.textContent = 'Ingresá tu email primero.'; return; }
+  await sb.auth.resetPasswordForEmail(email)
+  err.className = 'login-msg ok'
+  err.textContent = 'Te enviamos un email para resetear la contraseña.'
+}
+
+async function cerrarSesion() {
+  await sb.auth.signOut()
+  document.getElementById('app-screen').style.display = 'none'
+  document.getElementById('login-screen').style.display = 'flex'
+  userId = null; tablasCache = []; partidosCache = []
+}
+
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (session) {
+    userId = session.user.id
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app-screen').style.display = 'block'
+    await cargarTodo()
+  } else {
+    document.getElementById('login-screen').style.display = 'flex'
+    document.getElementById('app-screen').style.display = 'none'
   }
+})
 
-  // ---- RENDER TABLAS ----
-  function renderTablas(){
-    const c=document.getElementById('tablas-container');
-    if(!tablas.length){ c.innerHTML=`<div class="empty"><span>Sin tablas</span>Usá "+ Nueva tabla" para crear una.</div>`; return; }
-    const cls=['pos-1','pos-2','pos-3'];
-    let html='';
-    tablas.forEach(t=>{
-      const sorted=[...t.equipos].sort((a,b)=>b.pts-a.pts);
-      const rows=sorted.length
-        ? sorted.map((eq,i)=>`<tr>
-            <td class="c"><span class="pos-icon ${i<3?cls[i]:'pos-n'}">${i+1}</span></td>
-            <td class="equipo">${esc(eq.nombre)}</td>
-            <td class="pts">${eq.pts}</td>
-            <td><div class="td-acts">
-              <button class="tb-btn" onclick="abrirModalEquipoEditar(${t.id},${eq.id})">✏️</button>
-              <button class="tb-btn del" onclick="eliminarEquipo(${t.id},${eq.id})">🗑</button>
-            </div></td>
-          </tr>`).join('')
-        : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--hint);font-size:13px;">Sin equipos — usá "+ Equipo a tabla" para agregar</td></tr>`;
+// ---- CARGA ----
+async function cargarTodo() {
+  await Promise.all([cargarPartidos(), cargarTablas()])
+}
 
-      html+=`<div class="tabla-block">
-        <div class="tabla-block-header">
-          <div class="tabla-block-name">${esc(t.nombre)}</div>
-          <div class="tabla-block-actions">
-            <button class="tba-btn" onclick="abrirModalRename(${t.id})">✏️ Renombrar</button>
-            <button class="tba-btn del" onclick="eliminarTabla(${t.id})">🗑 Borrar</button>
-          </div>
+// ---- PARTIDOS ----
+async function cargarPartidos() {
+  const { data, error } = await sb.from('partidos').select('*').eq('user_id', userId).order('hora')
+  if (error) { console.error(error); return; }
+  partidosCache = data || []
+  renderPartidos(partidosCache)
+}
+
+function renderPartidos(partidos) {
+  const c = document.getElementById('partidos-container')
+  if (!partidos.length) { c.innerHTML = `<div class="empty"><span>Sin partidos</span>Usá "+ Partido" para agregar.</div>`; return; }
+  const grupos = {}
+  partidos.forEach(p => { const k = p.comp||'Sin comp'; if(!grupos[k]) grupos[k]=[]; grupos[k].push(p); })
+  let html = ''
+  for (const [comp, items] of Object.entries(grupos)) {
+    html += `<div class="section"><div class="section-label">${esc(comp)}</div>`
+    items.forEach(p => {
+      html += `<div class="match-card">
+        <div class="team"><div class="team-name">${esc(p.local)}</div><div class="team-sub">Local${p.zona?' · '+esc(p.zona):''}</div></div>
+        <div class="mid"><div class="hora-badge">${esc(p.hora)}</div><div class="vs-text">vs</div><div class="comp-badge">${esc(p.comp)}</div></div>
+        <div class="team right"><div class="team-name">${esc(p.visitante)}</div><div class="team-sub">Visitante${p.zona?' · '+esc(p.zona):''}</div></div>
+        <div class="card-actions">
+          <button class="card-btn" onclick="abrirModalPartido('${p.id}')">✏️ Editar</button>
+          <button class="card-btn del" onclick="eliminarPartido('${p.id}')">🗑 Eliminar</button>
         </div>
-        <table>
-          <thead><tr><th class="c">#</th><th>Equipo</th><th class="pts">PTS</th><th></th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-    });
-    c.innerHTML=html;
+      </div>`
+    })
+    html += `</div>`
   }
+  c.innerHTML = html
+}
 
-  // ---- PARTIDO ----
-  function abrirModalPartido(id){
-    editPId=id||null;
-    document.getElementById('mp-title').textContent=id?'Editar partido':'Nuevo partido';
-    const p=id?partidos.find(x=>x.id===id):null;
-    document.getElementById('f-local').value=p?p.local:'';
-    document.getElementById('f-visitante').value=p?p.visitante:'';
-    document.getElementById('f-hora').value=p?p.hora:'20:00';
-    document.getElementById('f-comp').value=p?p.comp:'LPF';
-    document.getElementById('f-zona').value=p?p.zona||'':'';
-    abrir('overlay-partido');
-    setTimeout(()=>document.getElementById('f-local').focus(),80);
+function abrirModalPartido(id) {
+  editPId = id || null
+  document.getElementById('mp-title').textContent = id ? 'Editar partido' : 'Nuevo partido'
+  if (id) {
+    const p = partidosCache.find(x => x.id === id)
+    document.getElementById('f-local').value    = p ? p.local : ''
+    document.getElementById('f-visitante').value = p ? p.visitante : ''
+    document.getElementById('f-hora').value     = p ? p.hora : '20:00'
+    document.getElementById('f-comp').value     = p ? p.comp : 'LPF'
+    document.getElementById('f-zona').value     = p ? p.zona||'' : ''
+  } else {
+    document.getElementById('f-local').value = ''
+    document.getElementById('f-visitante').value = ''
+    document.getElementById('f-hora').value = '20:00'
+    document.getElementById('f-comp').value = 'LPF'
+    document.getElementById('f-zona').value = ''
   }
-  function guardarPartido(){
-    const local=document.getElementById('f-local').value.trim();
-    const visitante=document.getElementById('f-visitante').value.trim();
-    if(!local||!visitante){ document.getElementById('f-local').focus(); return; }
-    const obj={id:editPId||nextId++,local,visitante,hora:document.getElementById('f-hora').value,comp:document.getElementById('f-comp').value.trim()||'LPF',zona:document.getElementById('f-zona').value.trim()};
-    if(editPId){ const i=partidos.findIndex(x=>x.id===editPId); partidos[i]=obj; } else { partidos.push(obj); }
-    cerrar('overlay-partido'); editPId=null; renderPartidos();
+  abrir('overlay-partido')
+  setTimeout(() => document.getElementById('f-local').focus(), 80)
+}
+
+async function guardarPartido() {
+  const local     = document.getElementById('f-local').value.trim()
+  const visitante = document.getElementById('f-visitante').value.trim()
+  if (!local || !visitante) { document.getElementById('f-local').focus(); return; }
+  const obj = { local, visitante, hora: document.getElementById('f-hora').value, comp: document.getElementById('f-comp').value.trim()||'LPF', zona: document.getElementById('f-zona').value.trim(), user_id: userId }
+  if (editPId) { await sb.from('partidos').update(obj).eq('id', editPId) }
+  else         { await sb.from('partidos').insert(obj) }
+  cerrar('overlay-partido'); editPId = null; await cargarPartidos()
+}
+
+async function eliminarPartido(id) {
+  if (!confirm('¿Eliminar partido?')) return
+  await sb.from('partidos').delete().eq('id', id)
+  await cargarPartidos()
+}
+
+// ---- TABLAS ----
+async function cargarTablas() {
+  const { data, error } = await sb.from('tablas_pos').select('*, equipos(*)').eq('user_id', userId).order('created_at')
+  if (error) { console.error(error); return; }
+  tablasCache = data || []
+  renderTablas(tablasCache)
+}
+
+function renderTablas(tablas) {
+  const c = document.getElementById('tablas-container')
+  if (!tablas.length) { c.innerHTML = `<div class="empty"><span>Sin tablas</span>Usá "+ Nueva tabla" para crear una.</div>`; return; }
+  const cls = ['pos-1','pos-2','pos-3']
+  let html = ''
+  tablas.forEach(t => {
+    const equipos = t.equipos || []
+    const sorted = [...equipos].sort((a,b) => b.pts - a.pts)
+    const rows = sorted.length
+      ? sorted.map((eq,i) => `<tr>
+          <td class="c"><span class="pos-icon ${i<3?cls[i]:'pos-n'}">${i+1}</span></td>
+          <td class="equipo">${esc(eq.nombre)}</td>
+          <td class="pts">${eq.pts}</td>
+          <td><div class="td-acts">
+            <button class="tb-btn" onclick="abrirModalEquipoEditar('${t.id}','${eq.id}')">✏️</button>
+            <button class="tb-btn del" onclick="eliminarEquipo('${t.id}','${eq.id}')">🗑</button>
+          </div></td>
+        </tr>`).join('')
+      : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--hint);font-size:13px;">Sin equipos — usá "+ Equipo a tabla"</td></tr>`
+
+    html += `<div class="tabla-block">
+      <div class="tabla-block-header">
+        <div class="tabla-block-name">${esc(t.nombre)}</div>
+        <div class="tabla-block-actions">
+          <button class="tba-btn" onclick="abrirModalRename('${t.id}')">✏️ Renombrar</button>
+          <button class="tba-btn del" onclick="eliminarTabla('${t.id}')">🗑 Borrar</button>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th class="c">#</th><th>Equipo</th><th class="pts">PTS</th><th></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`
+  })
+  c.innerHTML = html
+}
+
+function abrirModalNuevaTabla() {
+  document.getElementById('nt-nombre').value = ''
+  abrir('overlay-nueva-tabla')
+  setTimeout(() => document.getElementById('nt-nombre').focus(), 80)
+}
+async function guardarNuevaTabla() {
+  const nombre = document.getElementById('nt-nombre').value.trim()
+  if (!nombre) { document.getElementById('nt-nombre').focus(); return; }
+  await sb.from('tablas_pos').insert({ nombre, user_id: userId })
+  cerrar('overlay-nueva-tabla'); await cargarTablas()
+}
+
+function abrirModalRename(tablaId) {
+  renameTablaId = tablaId
+  const t = tablasCache.find(x => x.id === tablaId)
+  document.getElementById('rt-nombre').value = t ? t.nombre : ''
+  abrir('overlay-rename-tabla')
+  setTimeout(() => document.getElementById('rt-nombre').focus(), 80)
+}
+async function guardarRename() {
+  const nombre = document.getElementById('rt-nombre').value.trim()
+  if (!nombre) return
+  await sb.from('tablas_pos').update({ nombre }).eq('id', renameTablaId)
+  cerrar('overlay-rename-tabla'); renameTablaId = null; await cargarTablas()
+}
+async function eliminarTabla(id) {
+  if (!confirm('¿Eliminar esta tabla y todos sus equipos?')) return
+  await sb.from('tablas_pos').delete().eq('id', id)
+  await cargarTablas()
+}
+
+// ---- EQUIPOS ----
+function poblarSelectTablas(selId) {
+  const sel = document.getElementById('t-tabla')
+  sel.innerHTML = ''
+  if (!tablasCache.length) { sel.innerHTML = '<option value="">— Primero creá una tabla —</option>'; return; }
+  tablasCache.forEach(t => {
+    const opt = document.createElement('option')
+    opt.value = t.id; opt.textContent = t.nombre
+    if (selId && t.id === selId) opt.selected = true
+    sel.appendChild(opt)
+  })
+}
+
+function abrirModalEquipo() {
+  editTablaId = null; editEId = null
+  document.getElementById('me-title').textContent = 'Agregar equipo a tabla'
+  poblarSelectTablas(null)
+  document.getElementById('t-tabla').disabled = false
+  document.getElementById('t-nombre').value = ''
+  document.getElementById('t-pts').value = ''
+  abrir('overlay-equipo')
+  setTimeout(() => document.getElementById('t-nombre').focus(), 80)
+}
+
+function abrirModalEquipoEditar(tablaId, equipoId) {
+  editTablaId = tablaId; editEId = equipoId
+  document.getElementById('me-title').textContent = 'Editar equipo'
+  poblarSelectTablas(tablaId)
+  document.getElementById('t-tabla').disabled = true
+  const t = tablasCache.find(x => x.id === tablaId)
+  const eq = t ? (t.equipos||[]).find(x => x.id === equipoId) : null
+  document.getElementById('t-nombre').value = eq ? eq.nombre : ''
+  document.getElementById('t-pts').value   = eq ? eq.pts   : ''
+  abrir('overlay-equipo')
+  setTimeout(() => document.getElementById('t-nombre').focus(), 80)
+}
+
+async function guardarEquipo() {
+  const tablaId = document.getElementById('t-tabla').value
+  const nombre  = document.getElementById('t-nombre').value.trim()
+  const pts     = parseInt(document.getElementById('t-pts').value) || 0
+  if (!tablaId || !nombre) { document.getElementById('t-nombre').focus(); return; }
+  if (editEId) {
+    await sb.from('equipos').update({ nombre, pts }).eq('id', editEId)
+  } else {
+    await sb.from('equipos').insert({ tabla_id: tablaId, nombre, pts, user_id: userId })
   }
-  function eliminarPartido(id){ if(!confirm('¿Eliminar partido?')) return; partidos=partidos.filter(p=>p.id!==id); renderPartidos(); }
+  cerrar('overlay-equipo'); editTablaId = null; editEId = null; await cargarTablas()
+}
 
-  // ---- NUEVA TABLA ----
-  function abrirModalNuevaTabla(){ document.getElementById('nt-nombre').value=''; abrir('overlay-nueva-tabla'); setTimeout(()=>document.getElementById('nt-nombre').focus(),80); }
-  function guardarNuevaTabla(){
-    const nombre=document.getElementById('nt-nombre').value.trim();
-    if(!nombre){ document.getElementById('nt-nombre').focus(); return; }
-    tablas.push({id:nextId++,nombre,equipos:[]});
-    cerrar('overlay-nueva-tabla'); renderTablas();
-  }
+async function eliminarEquipo(tablaId, equipoId) {
+  if (!confirm('¿Eliminar equipo?')) return
+  await sb.from('equipos').delete().eq('id', equipoId)
+  await cargarTablas()
+}
 
-  // ---- RENOMBRAR TABLA ----
-  function abrirModalRename(tablaId){ renameTablaId=tablaId; const t=tablas.find(x=>x.id===tablaId); document.getElementById('rt-nombre').value=t.nombre; abrir('overlay-rename-tabla'); setTimeout(()=>document.getElementById('rt-nombre').focus(),80); }
-  function guardarRename(){ const nombre=document.getElementById('rt-nombre').value.trim(); if(!nombre) return; const t=tablas.find(x=>x.id===renameTablaId); if(t) t.nombre=nombre; cerrar('overlay-rename-tabla'); renameTablaId=null; renderTablas(); }
-  function eliminarTabla(id){ if(!confirm('¿Eliminar esta tabla y todos sus equipos?')) return; tablas=tablas.filter(t=>t.id!==id); renderTablas(); }
+// ---- UTILS ----
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function abrir(id){ document.getElementById(id).classList.add('active'); }
+function cerrar(id){ document.getElementById(id).classList.remove('active'); }
 
-  // ---- EQUIPO GLOBAL ----
-  function poblarSelectTablas(seleccionadoId){
-    const sel=document.getElementById('t-tabla');
-    sel.innerHTML='';
-    if(!tablas.length){ sel.innerHTML='<option value="">— Primero creá una tabla —</option>'; return; }
-    tablas.forEach(t=>{
-      const opt=document.createElement('option');
-      opt.value=t.id;
-      opt.textContent=t.nombre;
-      if(seleccionadoId && t.id===seleccionadoId) opt.selected=true;
-      sel.appendChild(opt);
-    });
-  }
-
-  function abrirModalEquipo(){
-    // Botón global: nueva entrada
-    editTablaId=null; editEId=null;
-    document.getElementById('me-title').textContent='Agregar equipo a tabla';
-    poblarSelectTablas(null);
-    document.getElementById('t-nombre').value='';
-    document.getElementById('t-pts').value='';
-    document.getElementById('t-tabla').disabled=false;
-    abrir('overlay-equipo');
-    setTimeout(()=>document.getElementById('t-nombre').focus(),80);
-  }
-
-  function abrirModalEquipoEditar(tablaId,equipoId){
-    // Editar equipo existente: fija la tabla
-    editTablaId=tablaId; editEId=equipoId;
-    document.getElementById('me-title').textContent='Editar equipo';
-    poblarSelectTablas(tablaId);
-    document.getElementById('t-tabla').disabled=true; // no se puede cambiar de tabla al editar
-    const t=tablas.find(x=>x.id===tablaId);
-    const eq=t.equipos.find(x=>x.id===equipoId);
-    document.getElementById('t-nombre').value=eq.nombre;
-    document.getElementById('t-pts').value=eq.pts;
-    abrir('overlay-equipo');
-    setTimeout(()=>document.getElementById('t-nombre').focus(),80);
-  }
-
-  function guardarEquipo(){
-    const tablaId=parseInt(document.getElementById('t-tabla').value);
-    const nombre=document.getElementById('t-nombre').value.trim();
-    const pts=parseInt(document.getElementById('t-pts').value)||0;
-    if(!tablaId||!nombre){ document.getElementById('t-nombre').focus(); return; }
-    const t=tablas.find(x=>x.id===tablaId);
-    if(!t) return;
-    const obj={id:editEId||nextId++,nombre,pts};
-    if(editEId){ const i=t.equipos.findIndex(x=>x.id===editEId); t.equipos[i]=obj; }
-    else { t.equipos.push(obj); }
-    cerrar('overlay-equipo'); editTablaId=null; editEId=null; renderTablas();
-  }
-  function eliminarEquipo(tablaId,equipoId){ if(!confirm('¿Eliminar equipo?')) return; const t=tablas.find(x=>x.id===tablaId); t.equipos=t.equipos.filter(e=>e.id!==equipoId); renderTablas(); }
-
-  // Cerrar modales
-  document.querySelectorAll('.overlay').forEach(o=>{ o.addEventListener('click',function(e){ if(e.target===this) this.classList.remove('active'); }); });
-  document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('active')); });
-
-  function exportarHTML(){
-    const blob=new Blob([document.documentElement.outerHTML],{type:'text/html'});
-    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='partidos-hoy.html'; a.click();
-  }
-
-  renderPartidos();
-  renderTablas();
+document.querySelectorAll('.overlay').forEach(o => {
+  o.addEventListener('click', function(e){ if(e.target===this) this.classList.remove('active'); })
+})
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape') document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('active'))
+})
 </script>
 </body>
 </html>
