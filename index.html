@@ -264,7 +264,7 @@ const SUPABASE_URL  = 'https://jzagaemzitudabeuufsv.supabase.co'
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6YWdhZW16aXR1ZGFiZXV1ZnN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzMzQxMDQsImV4cCI6MjA5MDkxMDEwNH0.iWXDZzevNemvRhT3nMi73TefgesNlekj9onrRCEhQJI'
 
 const { createClient } = supabase
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
+ window.sb = createClient(SUPABASE_URL, SUPABASE_ANON)
 
 let userId = null
 let editPId = null, editTablaId = null, editEId = null, renameTablaId = null
