@@ -26,12 +26,9 @@
   .btn:active { transform: scale(0.97); }
   .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   .btn.primary:hover { opacity: 0.85; }
-  .btn.red { border-color: #e0b0ab; color: #c0392b; background: #fff5f5; }
-  .btn.red:hover { background: #ffe0de; }
 
   .section { margin-bottom: 1.5rem; }
-  .sec-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 8px; }
-  .section-label { font-size: 10px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--hint); padding-left: 2px; }
+  .section-label { font-size: 10px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: var(--hint); padding-left: 2px; margin-bottom: 8px; }
 
   /* MATCH CARD */
   .match-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 8px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; transition: border-color 0.15s, box-shadow 0.15s; animation: fadeIn 0.3s ease both; }
@@ -51,15 +48,14 @@
   .card-btn.del { border-color: #e0b0ab; color: #c0392b; }
   .card-btn.del:hover { background: #ffe0de; }
 
-  /* DIVIDER */
   .divider { border: none; border-top: 2px solid var(--border); margin: 2rem 0; }
 
-  /* TABLAS SECTION */
+  /* TABLAS */
   .tablas-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.2rem; flex-wrap: wrap; gap: 8px; }
   .tablas-title { font-family: 'Bebas Neue', sans-serif; font-size: 28px; letter-spacing: 2px; }
 
   .tabla-block { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 1.2rem; overflow: hidden; animation: fadeIn 0.3s ease both; }
-  .tabla-block-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 8px; }
+  .tabla-block-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 8px; flex-wrap: wrap; }
   .tabla-block-name { font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 1.5px; }
   .tabla-block-actions { display: flex; gap: 6px; }
   .tba-btn { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-family: 'Barlow', sans-serif; transition: background 0.12s; }
@@ -70,8 +66,8 @@
   table { width: 100%; border-collapse: collapse; }
   thead tr { background: var(--accent); }
   thead th { font-family: 'Bebas Neue', sans-serif; font-size: 13px; letter-spacing: 1.5px; color: #fff; padding: 9px 14px; text-align: left; font-weight: 400; }
-  thead th.c { text-align: center; width: 56px; }
-  thead th.w44 { width: 44px; }
+  thead th.c { text-align: center; width: 44px; }
+  thead th.pts { text-align: center; width: 60px; }
   tbody tr { border-bottom: 1px solid var(--border); transition: background 0.12s; }
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: var(--badge-bg); }
@@ -89,7 +85,6 @@
   .tb-btn:hover { background: var(--badge-bg); color: var(--text); }
   .tb-btn.del { border-color: #e0b0ab; color: #c0392b; }
   .tb-btn.del:hover { background: #ffe0de; }
-  .tabla-footer { padding: 10px 14px; border-top: 1px solid var(--border); }
 
   /* MODAL */
   .overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; padding: 1rem; }
@@ -107,11 +102,16 @@
   .empty { text-align: center; padding: 2rem 1rem; color: var(--hint); font-size: 14px; border: 1.5px dashed var(--border); border-radius: var(--radius); }
   .empty span { display: block; font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: 2px; color: var(--border-hover); margin-bottom: 6px; }
 
+  /* SELECT estilo */
+  select option { background: #fff; color: #111; }
+
   @media (max-width: 480px) {
     .header-title { font-size: 36px; }
     .team-name { font-size: 14px; }
     .match-card { padding: 12px 14px; gap: 8px; }
     .two-col { grid-template-columns: 1fr; }
+    .toolbar { gap: 6px; }
+    .btn { font-size: 12px; padding: 7px 12px; }
   }
 </style>
 </head>
@@ -123,9 +123,11 @@
     <div class="header-date" id="fecha-hoy"></div>
   </div>
 
+  <!-- TOOLBAR GLOBAL -->
   <div class="toolbar">
     <button class="btn primary" onclick="abrirModalPartido()">+ Partido</button>
     <button class="btn primary" onclick="abrirModalNuevaTabla()">+ Nueva tabla</button>
+    <button class="btn primary" onclick="abrirModalEquipo()">+ Equipo a tabla</button>
     <button class="btn" onclick="exportarHTML()">Descargar HTML</button>
   </div>
 
@@ -156,7 +158,7 @@
     </div>
     <div class="field"><label>Zona / Detalle (opcional)</label><input id="f-zona" type="text" placeholder="Zona A, Interzonal..."></div>
     <div class="modal-actions">
-      <button class="btn" onclick="cerrarModalPartido()">Cancelar</button>
+      <button class="btn" onclick="cerrar('overlay-partido')">Cancelar</button>
       <button class="btn primary" onclick="guardarPartido()">Guardar</button>
     </div>
   </div>
@@ -168,7 +170,7 @@
     <h2>Nueva tabla</h2>
     <div class="field"><label>Nombre de la tabla</label><input id="nt-nombre" type="text" placeholder="Ej: Zona A, Liga local, Grupo 1..."></div>
     <div class="modal-actions">
-      <button class="btn" onclick="cerrarModalNuevaTabla()">Cancelar</button>
+      <button class="btn" onclick="cerrar('overlay-nueva-tabla')">Cancelar</button>
       <button class="btn primary" onclick="guardarNuevaTabla()">Crear tabla</button>
     </div>
   </div>
@@ -180,44 +182,47 @@
     <h2>Renombrar tabla</h2>
     <div class="field"><label>Nuevo nombre</label><input id="rt-nombre" type="text"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="cerrarModalRename()">Cancelar</button>
+      <button class="btn" onclick="cerrar('overlay-rename-tabla')">Cancelar</button>
       <button class="btn primary" onclick="guardarRename()">Guardar</button>
     </div>
   </div>
 </div>
 
-<!-- MODAL EQUIPO -->
+<!-- MODAL EQUIPO (GLOBAL con selector de tabla) -->
 <div class="overlay" id="overlay-equipo">
   <div class="modal">
-    <h2 id="me-title">Agregar equipo</h2>
+    <h2 id="me-title">Agregar equipo a tabla</h2>
+    <div class="field">
+      <label>¿A qué tabla?</label>
+      <select id="t-tabla"></select>
+    </div>
     <div class="field"><label>Nombre del equipo</label><input id="t-nombre" type="text" placeholder="Ej: EFI"></div>
     <div class="field"><label>Puntos</label><input id="t-pts" type="number" min="0" placeholder="Ej: 23"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="cerrarModalEquipo()">Cancelar</button>
+      <button class="btn" onclick="cerrar('overlay-equipo')">Cancelar</button>
       <button class="btn primary" onclick="guardarEquipo()">Guardar</button>
     </div>
   </div>
 </div>
 
 <script>
-  // ---- ESTADO ----
   let partidos = [
     { id:1, local:'Aldosivi', visitante:'Estudiantes RC', hora:'13:30', comp:'LPF', zona:'Zona B' },
     { id:2, local:'Independiente', visitante:'Racing Club', hora:'17:30', comp:'LPF', zona:'Interzonal' },
     { id:3, local:'Rosario Central', visitante:'Atlético Tucumán', hora:'21:00', comp:'LPF', zona:'Zona B' }
   ];
-
-  // Múltiples tablas: cada una tiene id, nombre, y lista de equipos
   let tablas = [
     { id:1, nombre:'Zona A', equipos:[ {id:1,nombre:'EFI',pts:23}, {id:2,nombre:'efur',pts:18} ] },
     { id:2, nombre:'Zona B', equipos:[ {id:3,nombre:'Los Tigres',pts:15}, {id:4,nombre:'Central FC',pts:12} ] }
   ];
-
   let editPId=null, editTablaId=null, editEId=null, renameTablaId=null, nextId=50;
 
   document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function cerrar(id){ document.getElementById(id).classList.remove('active'); }
+  function abrir(id){ document.getElementById(id).classList.add('active'); }
 
   // ---- RENDER PARTIDOS ----
   function renderPartidos(){
@@ -228,7 +233,7 @@
     let html='';
     for(const [comp,items] of Object.entries(grupos)){
       items.sort((a,b)=>a.hora.localeCompare(b.hora));
-      html+=`<div class="section"><div class="sec-row"><div class="section-label">${esc(comp)}</div></div>`;
+      html+=`<div class="section"><div class="section-label">${esc(comp)}</div>`;
       items.forEach(p=>{
         html+=`<div class="match-card">
           <div class="team"><div class="team-name">${esc(p.local)}</div><div class="team-sub">Local${p.zona?' · '+esc(p.zona):''}</div></div>
@@ -259,23 +264,22 @@
             <td class="equipo">${esc(eq.nombre)}</td>
             <td class="pts">${eq.pts}</td>
             <td><div class="td-acts">
-              <button class="tb-btn" onclick="abrirModalEquipo(${t.id},${eq.id})">✏️</button>
+              <button class="tb-btn" onclick="abrirModalEquipoEditar(${t.id},${eq.id})">✏️</button>
               <button class="tb-btn del" onclick="eliminarEquipo(${t.id},${eq.id})">🗑</button>
             </div></td>
           </tr>`).join('')
-        : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--hint);font-size:13px;">Sin equipos aún</td></tr>`;
+        : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--hint);font-size:13px;">Sin equipos — usá "+ Equipo a tabla" para agregar</td></tr>`;
 
       html+=`<div class="tabla-block">
         <div class="tabla-block-header">
           <div class="tabla-block-name">${esc(t.nombre)}</div>
           <div class="tabla-block-actions">
             <button class="tba-btn" onclick="abrirModalRename(${t.id})">✏️ Renombrar</button>
-            <button class="tba-btn" onclick="abrirModalEquipo(${t.id},null)">+ Equipo</button>
-            <button class="tba-btn del" onclick="eliminarTabla(${t.id})">🗑</button>
+            <button class="tba-btn del" onclick="eliminarTabla(${t.id})">🗑 Borrar</button>
           </div>
         </div>
         <table>
-          <thead><tr><th class="c w44">#</th><th>Equipo</th><th class="c">PTS</th><th></th></tr></thead>
+          <thead><tr><th class="c">#</th><th>Equipo</th><th class="pts">PTS</th><th></th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>`;
@@ -283,7 +287,7 @@
     c.innerHTML=html;
   }
 
-  // ---- PARTIDOS MODAL ----
+  // ---- PARTIDO ----
   function abrirModalPartido(id){
     editPId=id||null;
     document.getElementById('mp-title').textContent=id?'Editar partido':'Nuevo partido';
@@ -293,63 +297,89 @@
     document.getElementById('f-hora').value=p?p.hora:'20:00';
     document.getElementById('f-comp').value=p?p.comp:'LPF';
     document.getElementById('f-zona').value=p?p.zona||'':'';
-    document.getElementById('overlay-partido').classList.add('active');
+    abrir('overlay-partido');
     setTimeout(()=>document.getElementById('f-local').focus(),80);
   }
-  function cerrarModalPartido(){ document.getElementById('overlay-partido').classList.remove('active'); editPId=null; }
   function guardarPartido(){
     const local=document.getElementById('f-local').value.trim();
     const visitante=document.getElementById('f-visitante').value.trim();
     if(!local||!visitante){ document.getElementById('f-local').focus(); return; }
     const obj={id:editPId||nextId++,local,visitante,hora:document.getElementById('f-hora').value,comp:document.getElementById('f-comp').value.trim()||'LPF',zona:document.getElementById('f-zona').value.trim()};
     if(editPId){ const i=partidos.findIndex(x=>x.id===editPId); partidos[i]=obj; } else { partidos.push(obj); }
-    cerrarModalPartido(); renderPartidos();
+    cerrar('overlay-partido'); editPId=null; renderPartidos();
   }
   function eliminarPartido(id){ if(!confirm('¿Eliminar partido?')) return; partidos=partidos.filter(p=>p.id!==id); renderPartidos(); }
 
-  // ---- TABLA MODAL ----
-  function abrirModalNuevaTabla(){ document.getElementById('nt-nombre').value=''; document.getElementById('overlay-nueva-tabla').classList.add('active'); setTimeout(()=>document.getElementById('nt-nombre').focus(),80); }
-  function cerrarModalNuevaTabla(){ document.getElementById('overlay-nueva-tabla').classList.remove('active'); }
+  // ---- NUEVA TABLA ----
+  function abrirModalNuevaTabla(){ document.getElementById('nt-nombre').value=''; abrir('overlay-nueva-tabla'); setTimeout(()=>document.getElementById('nt-nombre').focus(),80); }
   function guardarNuevaTabla(){
     const nombre=document.getElementById('nt-nombre').value.trim();
     if(!nombre){ document.getElementById('nt-nombre').focus(); return; }
     tablas.push({id:nextId++,nombre,equipos:[]});
-    cerrarModalNuevaTabla(); renderTablas();
+    cerrar('overlay-nueva-tabla'); renderTablas();
   }
 
-  function abrirModalRename(tablaId){ renameTablaId=tablaId; const t=tablas.find(x=>x.id===tablaId); document.getElementById('rt-nombre').value=t.nombre; document.getElementById('overlay-rename-tabla').classList.add('active'); setTimeout(()=>document.getElementById('rt-nombre').focus(),80); }
-  function cerrarModalRename(){ document.getElementById('overlay-rename-tabla').classList.remove('active'); renameTablaId=null; }
-  function guardarRename(){ const nombre=document.getElementById('rt-nombre').value.trim(); if(!nombre) return; const t=tablas.find(x=>x.id===renameTablaId); if(t) t.nombre=nombre; cerrarModalRename(); renderTablas(); }
-
+  // ---- RENOMBRAR TABLA ----
+  function abrirModalRename(tablaId){ renameTablaId=tablaId; const t=tablas.find(x=>x.id===tablaId); document.getElementById('rt-nombre').value=t.nombre; abrir('overlay-rename-tabla'); setTimeout(()=>document.getElementById('rt-nombre').focus(),80); }
+  function guardarRename(){ const nombre=document.getElementById('rt-nombre').value.trim(); if(!nombre) return; const t=tablas.find(x=>x.id===renameTablaId); if(t) t.nombre=nombre; cerrar('overlay-rename-tabla'); renameTablaId=null; renderTablas(); }
   function eliminarTabla(id){ if(!confirm('¿Eliminar esta tabla y todos sus equipos?')) return; tablas=tablas.filter(t=>t.id!==id); renderTablas(); }
 
-  // ---- EQUIPO MODAL ----
-  function abrirModalEquipo(tablaId,equipoId){
-    editTablaId=tablaId; editEId=equipoId||null;
-    document.getElementById('me-title').textContent=equipoId?'Editar equipo':'Agregar equipo';
-    const t=tablas.find(x=>x.id===tablaId);
-    const eq=equipoId?t.equipos.find(x=>x.id===equipoId):null;
-    document.getElementById('t-nombre').value=eq?eq.nombre:'';
-    document.getElementById('t-pts').value=eq?eq.pts:'';
-    document.getElementById('overlay-equipo').classList.add('active');
+  // ---- EQUIPO GLOBAL ----
+  function poblarSelectTablas(seleccionadoId){
+    const sel=document.getElementById('t-tabla');
+    sel.innerHTML='';
+    if(!tablas.length){ sel.innerHTML='<option value="">— Primero creá una tabla —</option>'; return; }
+    tablas.forEach(t=>{
+      const opt=document.createElement('option');
+      opt.value=t.id;
+      opt.textContent=t.nombre;
+      if(seleccionadoId && t.id===seleccionadoId) opt.selected=true;
+      sel.appendChild(opt);
+    });
+  }
+
+  function abrirModalEquipo(){
+    // Botón global: nueva entrada
+    editTablaId=null; editEId=null;
+    document.getElementById('me-title').textContent='Agregar equipo a tabla';
+    poblarSelectTablas(null);
+    document.getElementById('t-nombre').value='';
+    document.getElementById('t-pts').value='';
+    document.getElementById('t-tabla').disabled=false;
+    abrir('overlay-equipo');
     setTimeout(()=>document.getElementById('t-nombre').focus(),80);
   }
-  function cerrarModalEquipo(){ document.getElementById('overlay-equipo').classList.remove('active'); editTablaId=null; editEId=null; }
+
+  function abrirModalEquipoEditar(tablaId,equipoId){
+    // Editar equipo existente: fija la tabla
+    editTablaId=tablaId; editEId=equipoId;
+    document.getElementById('me-title').textContent='Editar equipo';
+    poblarSelectTablas(tablaId);
+    document.getElementById('t-tabla').disabled=true; // no se puede cambiar de tabla al editar
+    const t=tablas.find(x=>x.id===tablaId);
+    const eq=t.equipos.find(x=>x.id===equipoId);
+    document.getElementById('t-nombre').value=eq.nombre;
+    document.getElementById('t-pts').value=eq.pts;
+    abrir('overlay-equipo');
+    setTimeout(()=>document.getElementById('t-nombre').focus(),80);
+  }
+
   function guardarEquipo(){
+    const tablaId=parseInt(document.getElementById('t-tabla').value);
     const nombre=document.getElementById('t-nombre').value.trim();
     const pts=parseInt(document.getElementById('t-pts').value)||0;
-    if(!nombre){ document.getElementById('t-nombre').focus(); return; }
-    const t=tablas.find(x=>x.id===editTablaId);
+    if(!tablaId||!nombre){ document.getElementById('t-nombre').focus(); return; }
+    const t=tablas.find(x=>x.id===tablaId);
+    if(!t) return;
     const obj={id:editEId||nextId++,nombre,pts};
-    if(editEId){ const i=t.equipos.findIndex(x=>x.id===editEId); t.equipos[i]=obj; } else { t.equipos.push(obj); }
-    cerrarModalEquipo(); renderTablas();
+    if(editEId){ const i=t.equipos.findIndex(x=>x.id===editEId); t.equipos[i]=obj; }
+    else { t.equipos.push(obj); }
+    cerrar('overlay-equipo'); editTablaId=null; editEId=null; renderTablas();
   }
   function eliminarEquipo(tablaId,equipoId){ if(!confirm('¿Eliminar equipo?')) return; const t=tablas.find(x=>x.id===tablaId); t.equipos=t.equipos.filter(e=>e.id!==equipoId); renderTablas(); }
 
-  // Cerrar modales al click afuera o Escape
-  ['overlay-partido','overlay-nueva-tabla','overlay-rename-tabla','overlay-equipo'].forEach(id=>{
-    document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) this.classList.remove('active'); });
-  });
+  // Cerrar modales
+  document.querySelectorAll('.overlay').forEach(o=>{ o.addEventListener('click',function(e){ if(e.target===this) this.classList.remove('active'); }); });
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.overlay').forEach(o=>o.classList.remove('active')); });
 
   function exportarHTML(){
