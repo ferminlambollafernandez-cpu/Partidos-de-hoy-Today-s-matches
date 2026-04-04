@@ -1,4 +1,7 @@
 <script>
+document.addEventListener("DOMContentLoaded", function() {
+
+  // -------- DATOS (CON GUARDADO) --------
   let partidos = JSON.parse(localStorage.getItem('partidos')) || [
     { id:1, local:'Aldosivi', visitante:'Estudiantes RC', hora:'13:30', comp:'LPF', zona:'Zona B' },
     { id:2, local:'Independiente', visitante:'Racing Club', hora:'17:30', comp:'LPF', zona:'Interzonal' },
@@ -17,68 +20,74 @@
     localStorage.setItem('tablas', JSON.stringify(tablas));
   }
 
- document.addEventListener("DOMContentLoaded", function() {
-
-  // Fecha
+  // -------- FECHA --------
   const fecha = document.getElementById('fecha-hoy');
   if (fecha) {
-    fecha.textContent = new Date().toLocaleDateString('es-AR', {
-      weekday:'long',
-      year:'numeric',
-      month:'long',
-      day:'numeric'
+    fecha.textContent = new Date().toLocaleDateString('es-AR',{
+      weekday:'long',year:'numeric',month:'long',day:'numeric'
     });
   }
-
-  // Render inicial
-  renderPartidos();
-  renderTablas();
-
-});
-    new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-  function cerrar(id){ document.getElementById(id).classList.remove('active'); }
-  function abrir(id){ document.getElementById(id).classList.add('active'); }
+  function cerrar(id){ document.getElementById(id)?.classList.remove('active'); }
+  function abrir(id){ document.getElementById(id)?.classList.add('active'); }
 
+  // -------- RENDER PARTIDOS --------
   function renderPartidos(){
     const c=document.getElementById('partidos-container');
-    if(!partidos.length){ c.innerHTML='Sin partidos'; return; }
+    if(!c) return;
+
+    if(!partidos.length){
+      c.innerHTML=`<div class="empty">Sin partidos</div>`;
+      return;
+    }
+
     let html='';
     partidos.forEach(p=>{
-      html+=`<div>
-        ${p.local} vs ${p.visitante} - ${p.hora}
+      html+=`<div class="match-card">
+        ${p.local} vs ${p.visitante} (${p.hora})
         <button onclick="eliminarPartido(${p.id})">X</button>
       </div>`;
     });
+
     c.innerHTML=html;
   }
 
+  // -------- RENDER TABLAS --------
   function renderTablas(){
     const c=document.getElementById('tablas-container');
-    if(!tablas.length){ c.innerHTML='Sin tablas'; return; }
+    if(!c) return;
+
+    if(!tablas.length){
+      c.innerHTML=`<div class="empty">Sin tablas</div>`;
+      return;
+    }
+
     let html='';
     tablas.forEach(t=>{
       html+=`<div><b>${t.nombre}</b><br>`;
       t.equipos.forEach(e=>{
-        html+=`${e.nombre} (${e.pts}) <button onclick="eliminarEquipo(${t.id},${e.id})">X</button><br>`;
+        html+=`${e.nombre} (${e.pts})
+        <button onclick="eliminarEquipo(${t.id},${e.id})">X</button><br>`;
       });
       html+='</div><br>';
     });
+
     c.innerHTML=html;
   }
 
-  function guardarPartido(){
-    const local=document.getElementById('f-local').value;
-    const visitante=document.getElementById('f-visitante').value;
+  // -------- PARTIDOS --------
+  window.guardarPartido = function(){
+    const local=document.getElementById('f-local')?.value;
+    const visitante=document.getElementById('f-visitante')?.value;
     if(!local||!visitante) return;
 
     partidos.push({
       id:nextId++,
       local,
       visitante,
-      hora:document.getElementById('f-hora').value,
+      hora:document.getElementById('f-hora')?.value || "20:00",
       comp:'LPF',
       zona:''
     });
@@ -87,14 +96,15 @@
     guardarDatos();
   }
 
-  function eliminarPartido(id){
+  window.eliminarPartido = function(id){
     partidos = partidos.filter(p=>p.id!==id);
     renderPartidos();
     guardarDatos();
   }
 
-  function guardarNuevaTabla(){
-    const nombre=document.getElementById('nt-nombre').value;
+  // -------- TABLAS --------
+  window.guardarNuevaTabla = function(){
+    const nombre=document.getElementById('nt-nombre')?.value;
     if(!nombre) return;
 
     tablas.push({id:nextId++, nombre, equipos:[]});
@@ -102,29 +112,37 @@
     guardarDatos();
   }
 
-  function eliminarTabla(id){
+  window.eliminarTabla = function(id){
     tablas = tablas.filter(t=>t.id!==id);
     renderTablas();
     guardarDatos();
   }
 
-  function guardarEquipo(){
-    const nombre=document.getElementById('t-nombre').value;
-    const pts=parseInt(document.getElementById('t-pts').value)||0;
+  // -------- EQUIPOS --------
+  window.guardarEquipo = function(){
+    const nombre=document.getElementById('t-nombre')?.value;
+    const pts=parseInt(document.getElementById('t-pts')?.value)||0;
     if(!nombre) return;
+
+    if(!tablas.length) return;
 
     tablas[0].equipos.push({id:nextId++, nombre, pts});
     renderTablas();
     guardarDatos();
   }
 
-  function eliminarEquipo(tablaId,equipoId){
+  window.eliminarEquipo = function(tablaId,equipoId){
     const t=tablas.find(t=>t.id===tablaId);
+    if(!t) return;
+
     t.equipos = t.equipos.filter(e=>e.id!==equipoId);
     renderTablas();
     guardarDatos();
   }
 
+  // -------- INIT --------
   renderPartidos();
   renderTablas();
+
+});
 </script>
