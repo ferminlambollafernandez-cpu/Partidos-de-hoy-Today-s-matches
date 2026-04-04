@@ -1,120 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Partidos de Hoy</title>
+</head>
+
+<body>
+
+<h1>⚽ Partidos de hoy</h1>
+<div id="fecha-hoy"></div>
+
+<hr>
+
+<h2>Agregar partido</h2>
+<input id="f-local" placeholder="Local">
+<input id="f-visitante" placeholder="Visitante">
+<input id="f-hora" type="time">
+<button onclick="guardarPartido()">Guardar</button>
+
+<h2>Partidos</h2>
+<div id="partidos-container"></div>
+
+<hr>
+
+<h2>Nueva tabla</h2>
+<input id="nt-nombre" placeholder="Nombre tabla">
+<button onclick="guardarNuevaTabla()">Crear</button>
+
+<h2>Tablas</h2>
+<div id="tablas-container"></div>
+
+<hr>
+
+<h2>Agregar equipo</h2>
+<input id="t-nombre" placeholder="Equipo">
+<input id="t-pts" type="number" placeholder="Pts">
+<button onclick="guardarEquipo()">Agregar</button>
+
+<!-- 🔥 SCRIPT ÚNICO -->
 <script>
-document.addEventListener("DOMContentLoaded", function() {
+console.log("VERSION FINAL OK");
 
-  console.log("APP OK");
+// DATOS
+let partidos = JSON.parse(localStorage.getItem('partidos')) || [];
+let tablas = JSON.parse(localStorage.getItem('tablas')) || [];
+let nextId = 1;
 
-  // -------- DATOS --------
-  let partidos = JSON.parse(localStorage.getItem('partidos')) || [];
-  let tablas = JSON.parse(localStorage.getItem('tablas')) || [];
+function guardarDatos(){
+  localStorage.setItem('partidos', JSON.stringify(partidos));
+  localStorage.setItem('tablas', JSON.stringify(tablas));
+}
 
-  let nextId = 1;
+// FECHA (SIN ERROR)
+const fecha = document.getElementById('fecha-hoy');
+if (fecha) {
+  fecha.textContent = new Date().toLocaleDateString('es-AR',{
+    weekday:'long',
+    year:'numeric',
+    month:'long',
+    day:'numeric'
+  });
+}
 
-  function guardarDatos(){
-    localStorage.setItem('partidos', JSON.stringify(partidos));
-    localStorage.setItem('tablas', JSON.stringify(tablas));
+// RENDER PARTIDOS
+function renderPartidos(){
+  const c = document.getElementById('partidos-container');
+  if (!c) return;
+
+  if (!partidos.length){
+    c.innerHTML = "Sin partidos";
+    return;
   }
 
-  // -------- FECHA (SIN ERROR) --------
-  const fecha = document.getElementById('fecha-hoy');
-  if (fecha) {
-    fecha.textContent = new Date().toLocaleDateString('es-AR',{
-      weekday:'long',
-      year:'numeric',
-      month:'long',
-      day:'numeric'
-    });
+  c.innerHTML = partidos.map(p =>
+    `${p.local} vs ${p.visitante} (${p.hora})
+     <button onclick="eliminarPartido(${p.id})">X</button><br>`
+  ).join("");
+}
+
+// RENDER TABLAS
+function renderTablas(){
+  const c = document.getElementById('tablas-container');
+  if (!c) return;
+
+  if (!tablas.length){
+    c.innerHTML = "Sin tablas";
+    return;
   }
 
-  // -------- RENDER PARTIDOS --------
-  function renderPartidos(){
-    const c = document.getElementById('partidos-container');
-    if (!c) return;
+  c.innerHTML = tablas.map(t =>
+    `<b>${t.nombre}</b><br>` +
+    t.equipos.map(e =>
+      `${e.nombre} (${e.pts})
+       <button onclick="eliminarEquipo(${t.id},${e.id})">X</button><br>`
+    ).join("") + "<br>"
+  ).join("");
+}
 
-    if (partidos.length === 0){
-      c.innerHTML = "Sin partidos";
-      return;
-    }
+// FUNCIONES
+function guardarPartido(){
+  const l = document.getElementById('f-local').value;
+  const v = document.getElementById('f-visitante').value;
+  const h = document.getElementById('f-hora').value || "20:00";
 
-    c.innerHTML = partidos.map(p => `
-      <div>
-        ${p.local} vs ${p.visitante} (${p.hora})
-        <button onclick="eliminarPartido(${p.id})">X</button>
-      </div>
-    `).join("");
-  }
+  if (!l || !v) return;
 
-  // -------- RENDER TABLAS --------
-  function renderTablas(){
-    const c = document.getElementById('tablas-container');
-    if (!c) return;
-
-    if (tablas.length === 0){
-      c.innerHTML = "Sin tablas";
-      return;
-    }
-
-    c.innerHTML = tablas.map(t => `
-      <div>
-        <b>${t.nombre}</b><br>
-        ${(t.equipos || []).map(e => `
-          ${e.nombre} (${e.pts})
-          <button onclick="eliminarEquipo(${t.id},${e.id})">X</button>
-        `).join("<br>")}
-      </div><br>
-    `).join("");
-  }
-
-  // -------- FUNCIONES GLOBALES --------
-  window.guardarPartido = function(){
-    const local = document.getElementById('f-local')?.value;
-    const visitante = document.getElementById('f-visitante')?.value;
-    const hora = document.getElementById('f-hora')?.value || "20:00";
-
-    if (!local || !visitante) return;
-
-    partidos.push({ id: nextId++, local, visitante, hora });
-    guardarDatos();
-    renderPartidos();
-  }
-
-  window.eliminarPartido = function(id){
-    partidos = partidos.filter(p => p.id !== id);
-    guardarDatos();
-    renderPartidos();
-  }
-
-  window.guardarNuevaTabla = function(){
-    const nombre = document.getElementById('nt-nombre')?.value;
-    if (!nombre) return;
-
-    tablas.push({ id: nextId++, nombre, equipos: [] });
-    guardarDatos();
-    renderTablas();
-  }
-
-  window.guardarEquipo = function(){
-    const nombre = document.getElementById('t-nombre')?.value;
-    const pts = parseInt(document.getElementById('t-pts')?.value) || 0;
-
-    if (!nombre || tablas.length === 0) return;
-
-    tablas[0].equipos.push({ id: nextId++, nombre, pts });
-    guardarDatos();
-    renderTablas();
-  }
-
-  window.eliminarEquipo = function(tablaId, equipoId){
-    const t = tablas.find(t => t.id === tablaId);
-    if (!t) return;
-
-    t.equipos = t.equipos.filter(e => e.id !== equipoId);
-    guardarDatos();
-    renderTablas();
-  }
-
-  // -------- INICIO --------
+  partidos.push({ id: nextId++, local:l, visitante:v, hora:h });
+  guardarDatos();
   renderPartidos();
-  renderTablas();
+}
 
-});
+function eliminarPartido(id){
+  partidos = partidos.filter(p => p.id !== id);
+  guardarDatos();
+  renderPartidos();
+}
+
+function guardarNuevaTabla(){
+  const nombre = document.getElementById('nt-nombre').value;
+  if (!nombre) return;
+
+  tablas.push({ id: nextId++, nombre, equipos: [] });
+  guardarDatos();
+  renderTablas();
+}
+
+function guardarEquipo(){
+  const nombre = document.getElementById('t-nombre').value;
+  const pts = parseInt(document.getElementById('t-pts').value) || 0;
+
+  if (!nombre || !tablas.length) return;
+
+  tablas[0].equipos.push({ id: nextId++, nombre, pts });
+  guardarDatos();
+  renderTablas();
+}
+
+function eliminarEquipo(tablaId, equipoId){
+  const t = tablas.find(t => t.id === tablaId);
+  if (!t) return;
+
+  t.equipos = t.equipos.filter(e => e.id !== equipoId);
+  guardarDatos();
+  renderTablas();
+}
+
+// INIT
+renderPartidos();
+renderTablas();
 </script>
+
+</body>
+</html>
