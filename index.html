@@ -17,7 +17,24 @@
     localStorage.setItem('tablas', JSON.stringify(tablas));
   }
 
-  document.getElementById('fecha-hoy').textContent =
+ document.addEventListener("DOMContentLoaded", function() {
+
+  // Fecha
+  const fecha = document.getElementById('fecha-hoy');
+  if (fecha) {
+    fecha.textContent = new Date().toLocaleDateString('es-AR', {
+      weekday:'long',
+      year:'numeric',
+      month:'long',
+      day:'numeric'
+    });
+  }
+
+  // Render inicial
+  renderPartidos();
+  renderTablas();
+
+});
     new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 
   function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
