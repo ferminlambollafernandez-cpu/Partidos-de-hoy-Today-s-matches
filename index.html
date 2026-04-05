@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Partidos de Hoy — Fútbol</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root {
@@ -193,7 +192,6 @@
   </div>
 </div>
 
-<!-- MODALES -->
 <div class="overlay" id="overlay-partido">
   <div class="modal">
     <h2 id="mp-title">Nuevo partido</h2>
@@ -249,59 +247,77 @@
 </div>
 
 <script>
+// ── CONFIG ──────────────────────────────────────────
 const SUPABASE_URL  = 'https://jzagaemzitudabeuufsv.supabase.co'
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6YWdhZW16aXR1ZGFiZXV1ZnN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzMzQxMDQsImV4cCI6MjA5MDkxMDEwNH0.iWXDZzevNemvRhT3nMi73TefgesNlekj9onrRCEhQJI'
+const STORAGE_KEY   = 'futbol_session'
+// ────────────────────────────────────────────────────
 
-const { createClient } = supabase
-window.sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-    storage: window.localStorage,
-    storageKey: 'futbol-auth-v2',
-    flowType: 'implicit'
+// ── API directa sin SDK (evita el bug del lock) ──────
+async function sbFetch(path, options = {}) {
+  const session = getSession()
+  const headers = {
+    'apikey': SUPABASE_ANON,
+    'Content-Type': 'application/json',
+    ...(session ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+    ...options.headers
   }
-})
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(JSON.stringify(err))
+  }
+  const text = await res.text()
+  return text ? JSON.parse(text) : null
+}
 
+async function sbAuth(endpoint, body) {
+  const res = await fetch(`${SUPABASE_URL}/auth/v1/${endpoint}`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error_description || data.msg || 'Error de autenticación')
+  return data
+}
+
+// ── SESIÓN en localStorage ───────────────────────────
+function getSession() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) } catch { return null }
+}
+function saveSession(s) { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)) }
+function clearSession() { localStorage.removeItem(STORAGE_KEY) }
+
+// ── ESTADO ───────────────────────────────────────────
 let userId = null
 let editPId = null, editTablaId = null, editEId = null, renameTablaId = null
 let tablasCache = [], partidosCache = []
 
 document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})
 
-function mostrarApp() {
-  document.getElementById('login-screen').style.display = 'none'
-  document.getElementById('app-screen').style.display = 'block'
-}
-function mostrarLogin2() {
-  document.getElementById('app-screen').style.display = 'none'
-  document.getElementById('login-screen').style.display = 'flex'
-}
-
-// Revisar sesión guardada al cargar
+// ── INIT ─────────────────────────────────────────────
 window.addEventListener('load', async () => {
-  const { data } = await sb.auth.getSession()
-  if (data && data.session) {
-    userId = data.session.user.id
-    mostrarApp()
-    await cargarTodo()
-  } else {
-    mostrarLogin2()
-  }
-})
-
-sb.auth.onAuthStateChange(async (event, session) => {
-  if (session) {
+  const session = getSession()
+  if (session && session.access_token) {
     userId = session.user.id
     mostrarApp()
     await cargarTodo()
   } else {
-    userId = null
-    mostrarLogin2()
+    mostrarLoginScreen()
   }
 })
 
+function mostrarApp() {
+  document.getElementById('login-screen').style.display = 'none'
+  document.getElementById('app-screen').style.display = 'block'
+}
+function mostrarLoginScreen() {
+  document.getElementById('app-screen').style.display = 'none'
+  document.getElementById('login-screen').style.display = 'flex'
+}
+
+// ── AUTH ─────────────────────────────────────────────
 function togglePwd(inputId, btn) {
   const inp = document.getElementById(inputId)
   inp.type = inp.type === 'password' ? 'text' : 'password'
@@ -318,9 +334,16 @@ async function iniciarSesion() {
   if (!email || !pwd) { err.textContent = 'Completá email y contraseña.'; return; }
   const btn = document.getElementById('btn-login')
   btn.disabled = true; btn.textContent = 'Ingresando...'
-  const { error } = await sb.auth.signInWithPassword({ email, password: pwd })
+  try {
+    const data = await sbAuth('token?grant_type=password', { email, password: pwd })
+    saveSession({ access_token: data.access_token, refresh_token: data.refresh_token, user: data.user })
+    userId = data.user.id
+    mostrarApp()
+    await cargarTodo()
+  } catch(e) {
+    err.textContent = 'Email o contraseña incorrectos.'
+  }
   btn.disabled = false; btn.textContent = 'Iniciar sesión'
-  if (error) { err.textContent = 'Email o contraseña incorrectos.'; }
 }
 
 async function registrarse() {
@@ -329,35 +352,46 @@ async function registrarse() {
   const err   = document.getElementById('reg-err')
   err.className = 'login-msg err'; err.textContent = ''
   if (pwd.length < 6) { err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; return; }
-  const { error } = await sb.auth.signUp({ email, password: pwd })
-  if (error) { err.textContent = error.message; return; }
-  err.className = 'login-msg ok'
-  err.textContent = '¡Cuenta creada! Revisá tu email para confirmar.'
+  try {
+    await sbAuth('signup', { email, password: pwd })
+    err.className = 'login-msg ok'
+    err.textContent = '¡Cuenta creada! Revisá tu email para confirmar.'
+  } catch(e) {
+    err.textContent = e.message
+  }
 }
 
 async function olvidePwd() {
   const email = document.getElementById('l-email').value.trim()
   const err = document.getElementById('login-err')
   if (!email) { err.textContent = 'Ingresá tu email primero.'; return; }
-  await sb.auth.resetPasswordForEmail(email)
+  await fetch(`${SUPABASE_URL}/auth/v1/recover`, {
+    method: 'POST',
+    headers: { 'apikey': SUPABASE_ANON, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email })
+  })
   err.className = 'login-msg ok'
   err.textContent = 'Te enviamos un email para resetear la contraseña.'
 }
 
-async function cerrarSesion() {
-  await sb.auth.signOut()
+function cerrarSesion() {
+  clearSession()
   userId = null; tablasCache = []; partidosCache = []
+  mostrarLoginScreen()
 }
 
+// ── CARGAR ───────────────────────────────────────────
 async function cargarTodo() {
   await Promise.all([cargarPartidos(), cargarTablas()])
 }
 
+// ── PARTIDOS ─────────────────────────────────────────
 async function cargarPartidos() {
-  const { data, error } = await sb.from('partidos').select('*').eq('user_id', userId).order('hora')
-  if (error) { console.error('partidos error:', error); return; }
-  partidosCache = data || []
-  renderPartidos(partidosCache)
+  try {
+    const data = await sbFetch(`partidos?user_id=eq.${userId}&order=hora`, { headers: { 'Prefer': 'return=representation' } })
+    partidosCache = data || []
+    renderPartidos(partidosCache)
+  } catch(e) { console.error('cargar partidos:', e) }
 }
 
 function renderPartidos(partidos) {
@@ -388,11 +422,11 @@ function abrirModalPartido(id) {
   editPId = id || null
   document.getElementById('mp-title').textContent = id ? 'Editar partido' : 'Nuevo partido'
   const p = id ? partidosCache.find(x => x.id === id) : null
-  document.getElementById('f-local').value    = p ? p.local : ''
+  document.getElementById('f-local').value     = p ? p.local : ''
   document.getElementById('f-visitante').value = p ? p.visitante : ''
-  document.getElementById('f-hora').value     = p ? p.hora : '20:00'
-  document.getElementById('f-comp').value     = p ? p.comp : 'LPF'
-  document.getElementById('f-zona').value     = p ? p.zona||'' : ''
+  document.getElementById('f-hora').value      = p ? p.hora : '20:00'
+  document.getElementById('f-comp').value      = p ? p.comp : 'LPF'
+  document.getElementById('f-zona').value      = p ? p.zona||'' : ''
   abrir('overlay-partido')
   setTimeout(() => document.getElementById('f-local').focus(), 80)
 }
@@ -402,24 +436,34 @@ async function guardarPartido() {
   const visitante = document.getElementById('f-visitante').value.trim()
   if (!local || !visitante) { document.getElementById('f-local').focus(); return; }
   const obj = { local, visitante, hora: document.getElementById('f-hora').value, comp: document.getElementById('f-comp').value.trim()||'LPF', zona: document.getElementById('f-zona').value.trim(), user_id: userId }
-  const { error } = editPId
-    ? await sb.from('partidos').update(obj).eq('id', editPId)
-    : await sb.from('partidos').insert(obj)
-  if (error) { console.error('guardar partido error:', error); return; }
-  cerrar('overlay-partido'); editPId = null; await cargarPartidos()
+  try {
+    if (editPId) {
+      await sbFetch(`partidos?id=eq.${editPId}`, { method: 'PATCH', body: JSON.stringify(obj) })
+    } else {
+      await sbFetch('partidos', { method: 'POST', body: JSON.stringify(obj), headers: { 'Prefer': 'return=minimal' } })
+    }
+    cerrar('overlay-partido'); editPId = null; await cargarPartidos()
+  } catch(e) { console.error('guardar partido:', e) }
 }
 
 async function eliminarPartido(id) {
   if (!confirm('¿Eliminar partido?')) return
-  await sb.from('partidos').delete().eq('id', id)
-  await cargarPartidos()
+  try {
+    await sbFetch(`partidos?id=eq.${id}`, { method: 'DELETE' })
+    await cargarPartidos()
+  } catch(e) { console.error(e) }
 }
 
+// ── TABLAS ───────────────────────────────────────────
 async function cargarTablas() {
-  const { data, error } = await sb.from('tablas_pos').select('*, equipos(*)').eq('user_id', userId).order('created_at')
-  if (error) { console.error('tablas error:', error); return; }
-  tablasCache = data || []
-  renderTablas(tablasCache)
+  try {
+    const tablas = await sbFetch(`tablas_pos?user_id=eq.${userId}&order=created_at`)
+    for (const t of (tablas || [])) {
+      t.equipos = await sbFetch(`equipos?tabla_id=eq.${t.id}&order=pts.desc`) || []
+    }
+    tablasCache = tablas || []
+    renderTablas(tablasCache)
+  } catch(e) { console.error('cargar tablas:', e) }
 }
 
 function renderTablas(tablas) {
@@ -466,9 +510,10 @@ function abrirModalNuevaTabla() {
 async function guardarNuevaTabla() {
   const nombre = document.getElementById('nt-nombre').value.trim()
   if (!nombre) { document.getElementById('nt-nombre').focus(); return; }
-  const { error } = await sb.from('tablas_pos').insert({ nombre, user_id: userId })
-  if (error) { console.error('nueva tabla error:', error); return; }
-  cerrar('overlay-nueva-tabla'); await cargarTablas()
+  try {
+    await sbFetch('tablas_pos', { method: 'POST', body: JSON.stringify({ nombre, user_id: userId }), headers: { 'Prefer': 'return=minimal' } })
+    cerrar('overlay-nueva-tabla'); await cargarTablas()
+  } catch(e) { console.error('nueva tabla:', e) }
 }
 
 function abrirModalRename(tablaId) {
@@ -481,15 +526,20 @@ function abrirModalRename(tablaId) {
 async function guardarRename() {
   const nombre = document.getElementById('rt-nombre').value.trim()
   if (!nombre) return
-  await sb.from('tablas_pos').update({ nombre }).eq('id', renameTablaId)
-  cerrar('overlay-rename-tabla'); renameTablaId = null; await cargarTablas()
+  try {
+    await sbFetch(`tablas_pos?id=eq.${renameTablaId}`, { method: 'PATCH', body: JSON.stringify({ nombre }) })
+    cerrar('overlay-rename-tabla'); renameTablaId = null; await cargarTablas()
+  } catch(e) { console.error(e) }
 }
 async function eliminarTabla(id) {
   if (!confirm('¿Eliminar esta tabla y todos sus equipos?')) return
-  await sb.from('tablas_pos').delete().eq('id', id)
-  await cargarTablas()
+  try {
+    await sbFetch(`tablas_pos?id=eq.${id}`, { method: 'DELETE' })
+    await cargarTablas()
+  } catch(e) { console.error(e) }
 }
 
+// ── EQUIPOS ──────────────────────────────────────────
 function poblarSelectTablas(selId) {
   const sel = document.getElementById('t-tabla')
   sel.innerHTML = ''
@@ -531,19 +581,25 @@ async function guardarEquipo() {
   const nombre  = document.getElementById('t-nombre').value.trim()
   const pts     = parseInt(document.getElementById('t-pts').value) || 0
   if (!tablaId || !nombre) { document.getElementById('t-nombre').focus(); return; }
-  const { error } = editEId
-    ? await sb.from('equipos').update({ nombre, pts }).eq('id', editEId)
-    : await sb.from('equipos').insert({ tabla_id: tablaId, nombre, pts, user_id: userId })
-  if (error) { console.error('guardar equipo error:', error); return; }
-  cerrar('overlay-equipo'); editTablaId = null; editEId = null; await cargarTablas()
+  try {
+    if (editEId) {
+      await sbFetch(`equipos?id=eq.${editEId}`, { method: 'PATCH', body: JSON.stringify({ nombre, pts }) })
+    } else {
+      await sbFetch('equipos', { method: 'POST', body: JSON.stringify({ tabla_id: tablaId, nombre, pts, user_id: userId }), headers: { 'Prefer': 'return=minimal' } })
+    }
+    cerrar('overlay-equipo'); editTablaId = null; editEId = null; await cargarTablas()
+  } catch(e) { console.error('guardar equipo:', e) }
 }
 
 async function eliminarEquipo(tablaId, equipoId) {
   if (!confirm('¿Eliminar equipo?')) return
-  await sb.from('equipos').delete().eq('id', equipoId)
-  await cargarTablas()
+  try {
+    await sbFetch(`equipos?id=eq.${equipoId}`, { method: 'DELETE' })
+    await cargarTablas()
+  } catch(e) { console.error(e) }
 }
 
+// ── UTILS ────────────────────────────────────────────
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function abrir(id){ document.getElementById(id).classList.add('active'); }
 function cerrar(id){ document.getElementById(id).classList.remove('active'); }
