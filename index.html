@@ -18,6 +18,7 @@
   body { background: var(--bg); color: var(--text); font-family: 'Barlow', sans-serif; min-height: 100vh; padding: 2rem 1rem; }
   .container { max-width: 680px; margin: 0 auto; }
 
+  /* LOGIN */
   #login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
   .login-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2rem; width: 100%; max-width: 380px; }
   .login-logo { font-family: 'Bebas Neue', sans-serif; font-size: 32px; letter-spacing: 3px; margin-bottom: 6px; }
@@ -40,6 +41,7 @@
   .forgot { text-align: center; margin-top: 10px; }
   .forgot a { font-size: 13px; color: var(--teal); cursor: pointer; }
 
+  /* APP */
   #app-screen { display: none; }
   .header { margin-bottom: 2rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .header-title { font-family: 'Bebas Neue', sans-serif; font-size: 48px; letter-spacing: 3px; line-height: 1; }
@@ -138,10 +140,12 @@
 </head>
 <body>
 
+<!-- LOGIN -->
 <div id="login-screen">
   <div class="login-card">
     <div class="login-logo">⚽ Fútbol</div>
     <div class="login-sub">Iniciá sesión para gestionar tus partidos</div>
+
     <div id="login-form">
       <div class="lfield"><label>Email</label><input id="l-email" type="email" placeholder="tu@email.com"></div>
       <div class="lfield">
@@ -156,6 +160,7 @@
       <div class="login-msg err" id="login-err"></div>
       <div class="login-switch">¿No tenés cuenta? <a onclick="mostrarRegistro()">Registrate</a></div>
     </div>
+
     <div id="registro-form" style="display:none">
       <div class="lfield"><label>Email</label><input id="r-email" type="email" placeholder="tu@email.com"></div>
       <div class="lfield">
@@ -172,6 +177,7 @@
   </div>
 </div>
 
+<!-- APP -->
 <div id="app-screen">
   <div class="container">
     <div class="header">
@@ -181,11 +187,13 @@
       </div>
       <button class="logout-btn" onclick="cerrarSesion()">Cerrar sesión</button>
     </div>
+
     <div class="toolbar">
       <button class="btn primary" onclick="abrirModalPartido()">+ Partido</button>
       <button class="btn primary" onclick="abrirModalNuevaTabla()">+ Nueva tabla</button>
       <button class="btn primary" onclick="abrirModalEquipo()">+ Equipo a tabla</button>
     </div>
+
     <div id="partidos-container"><div class="loading"><span>Cargando...</span></div></div>
     <hr class="divider">
     <div class="tablas-title">Tablas de posiciones</div>
@@ -193,7 +201,7 @@
   </div>
 </div>
 
-<!-- MODALES -->
+<!-- MODAL PARTIDO -->
 <div class="overlay" id="overlay-partido">
   <div class="modal">
     <h2 id="mp-title">Nuevo partido</h2>
@@ -213,6 +221,7 @@
   </div>
 </div>
 
+<!-- MODAL NUEVA TABLA -->
 <div class="overlay" id="overlay-nueva-tabla">
   <div class="modal">
     <h2>Nueva tabla</h2>
@@ -224,6 +233,7 @@
   </div>
 </div>
 
+<!-- MODAL RENOMBRAR -->
 <div class="overlay" id="overlay-rename-tabla">
   <div class="modal">
     <h2>Renombrar tabla</h2>
@@ -235,6 +245,7 @@
   </div>
 </div>
 
+<!-- MODAL EQUIPO -->
 <div class="overlay" id="overlay-equipo">
   <div class="modal">
     <h2 id="me-title">Agregar equipo a tabla</h2>
@@ -253,55 +264,16 @@ const SUPABASE_URL  = 'https://jzagaemzitudabeuufsv.supabase.co'
 const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp6YWdhZW16aXR1ZGFiZXV1ZnN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzMzQxMDQsImV4cCI6MjA5MDkxMDEwNH0.iWXDZzevNemvRhT3nMi73TefgesNlekj9onrRCEhQJI'
 
 const { createClient } = supabase
-window.sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: false,
-    storage: window.localStorage,
-    storageKey: 'futbol-auth-v2',
-    flowType: 'implicit'
-  }
-})
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
 
 let userId = null
 let editPId = null, editTablaId = null, editEId = null, renameTablaId = null
-let tablasCache = [], partidosCache = []
+let tablasCache = []
+let partidosCache = []
 
 document.getElementById('fecha-hoy').textContent = new Date().toLocaleDateString('es-AR',{weekday:'long',year:'numeric',month:'long',day:'numeric'})
 
-function mostrarApp() {
-  document.getElementById('login-screen').style.display = 'none'
-  document.getElementById('app-screen').style.display = 'block'
-}
-function mostrarLogin2() {
-  document.getElementById('app-screen').style.display = 'none'
-  document.getElementById('login-screen').style.display = 'flex'
-}
-
-// Revisar sesión guardada al cargar
-window.addEventListener('load', async () => {
-  const { data } = await sb.auth.getSession()
-  if (data && data.session) {
-    userId = data.session.user.id
-    mostrarApp()
-    await cargarTodo()
-  } else {
-    mostrarLogin2()
-  }
-})
-
-sb.auth.onAuthStateChange(async (event, session) => {
-  if (session) {
-    userId = session.user.id
-    mostrarApp()
-    await cargarTodo()
-  } else {
-    userId = null
-    mostrarLogin2()
-  }
-})
-
+// ---- AUTH ----
 function togglePwd(inputId, btn) {
   const inp = document.getElementById(inputId)
   inp.type = inp.type === 'password' ? 'text' : 'password'
@@ -346,16 +318,32 @@ async function olvidePwd() {
 
 async function cerrarSesion() {
   await sb.auth.signOut()
+  document.getElementById('app-screen').style.display = 'none'
+  document.getElementById('login-screen').style.display = 'flex'
   userId = null; tablasCache = []; partidosCache = []
 }
 
+sb.auth.onAuthStateChange(async (event, session) => {
+  if (session) {
+    userId = session.user.id
+    document.getElementById('login-screen').style.display = 'none'
+    document.getElementById('app-screen').style.display = 'block'
+    await cargarTodo()
+  } else {
+    document.getElementById('login-screen').style.display = 'flex'
+    document.getElementById('app-screen').style.display = 'none'
+  }
+})
+
+// ---- CARGA ----
 async function cargarTodo() {
   await Promise.all([cargarPartidos(), cargarTablas()])
 }
 
+// ---- PARTIDOS ----
 async function cargarPartidos() {
   const { data, error } = await sb.from('partidos').select('*').eq('user_id', userId).order('hora')
-  if (error) { console.error('partidos error:', error); return; }
+  if (error) { console.error(error); return; }
   partidosCache = data || []
   renderPartidos(partidosCache)
 }
@@ -387,12 +375,20 @@ function renderPartidos(partidos) {
 function abrirModalPartido(id) {
   editPId = id || null
   document.getElementById('mp-title').textContent = id ? 'Editar partido' : 'Nuevo partido'
-  const p = id ? partidosCache.find(x => x.id === id) : null
-  document.getElementById('f-local').value    = p ? p.local : ''
-  document.getElementById('f-visitante').value = p ? p.visitante : ''
-  document.getElementById('f-hora').value     = p ? p.hora : '20:00'
-  document.getElementById('f-comp').value     = p ? p.comp : 'LPF'
-  document.getElementById('f-zona').value     = p ? p.zona||'' : ''
+  if (id) {
+    const p = partidosCache.find(x => x.id === id)
+    document.getElementById('f-local').value    = p ? p.local : ''
+    document.getElementById('f-visitante').value = p ? p.visitante : ''
+    document.getElementById('f-hora').value     = p ? p.hora : '20:00'
+    document.getElementById('f-comp').value     = p ? p.comp : 'LPF'
+    document.getElementById('f-zona').value     = p ? p.zona||'' : ''
+  } else {
+    document.getElementById('f-local').value = ''
+    document.getElementById('f-visitante').value = ''
+    document.getElementById('f-hora').value = '20:00'
+    document.getElementById('f-comp').value = 'LPF'
+    document.getElementById('f-zona').value = ''
+  }
   abrir('overlay-partido')
   setTimeout(() => document.getElementById('f-local').focus(), 80)
 }
@@ -402,13 +398,8 @@ async function guardarPartido() {
   const visitante = document.getElementById('f-visitante').value.trim()
   if (!local || !visitante) { document.getElementById('f-local').focus(); return; }
   const obj = { local, visitante, hora: document.getElementById('f-hora').value, comp: document.getElementById('f-comp').value.trim()||'LPF', zona: document.getElementById('f-zona').value.trim(), user_id: userId }
-  const { error } = editPId
-    ? await sb.from('partidos').update(obj).eq('id', editPId)
-    : await sb.from('partidos').insert(obj)
-  if (error) { console.error('guardar partido error:', error); return; 
- alert(error.message); // 👈 ESTO ES CLAVE
-  return; 
-}
+  if (editPId) { await sb.from('partidos').update(obj).eq('id', editPId) }
+  else         { await sb.from('partidos').insert(obj) }
   cerrar('overlay-partido'); editPId = null; await cargarPartidos()
 }
 
@@ -418,9 +409,10 @@ async function eliminarPartido(id) {
   await cargarPartidos()
 }
 
+// ---- TABLAS ----
 async function cargarTablas() {
   const { data, error } = await sb.from('tablas_pos').select('*, equipos(*)').eq('user_id', userId).order('created_at')
-  if (error) { console.error('tablas error:', error); return; }
+  if (error) { console.error(error); return; }
   tablasCache = data || []
   renderTablas(tablasCache)
 }
@@ -444,6 +436,7 @@ function renderTablas(tablas) {
           </div></td>
         </tr>`).join('')
       : `<tr><td colspan="4" style="padding:16px;text-align:center;color:var(--hint);font-size:13px;">Sin equipos — usá "+ Equipo a tabla"</td></tr>`
+
     html += `<div class="tabla-block">
       <div class="tabla-block-header">
         <div class="tabla-block-name">${esc(t.nombre)}</div>
@@ -469,8 +462,7 @@ function abrirModalNuevaTabla() {
 async function guardarNuevaTabla() {
   const nombre = document.getElementById('nt-nombre').value.trim()
   if (!nombre) { document.getElementById('nt-nombre').focus(); return; }
-  const { error } = await sb.from('tablas_pos').insert({ nombre, user_id: userId })
-  if (error) { console.error('nueva tabla error:', error); return; }
+  await sb.from('tablas_pos').insert({ nombre, user_id: userId })
   cerrar('overlay-nueva-tabla'); await cargarTablas()
 }
 
@@ -493,6 +485,7 @@ async function eliminarTabla(id) {
   await cargarTablas()
 }
 
+// ---- EQUIPOS ----
 function poblarSelectTablas(selId) {
   const sel = document.getElementById('t-tabla')
   sel.innerHTML = ''
@@ -534,10 +527,11 @@ async function guardarEquipo() {
   const nombre  = document.getElementById('t-nombre').value.trim()
   const pts     = parseInt(document.getElementById('t-pts').value) || 0
   if (!tablaId || !nombre) { document.getElementById('t-nombre').focus(); return; }
-  const { error } = editEId
-    ? await sb.from('equipos').update({ nombre, pts }).eq('id', editEId)
-    : await sb.from('equipos').insert({ tabla_id: tablaId, nombre, pts, user_id: userId })
-  if (error) { console.error('guardar equipo error:', error); return; }
+  if (editEId) {
+    await sb.from('equipos').update({ nombre, pts }).eq('id', editEId)
+  } else {
+    await sb.from('equipos').insert({ tabla_id: tablaId, nombre, pts, user_id: userId })
+  }
   cerrar('overlay-equipo'); editTablaId = null; editEId = null; await cargarTablas()
 }
 
@@ -547,6 +541,7 @@ async function eliminarEquipo(tablaId, equipoId) {
   await cargarTablas()
 }
 
+// ---- UTILS ----
 function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function abrir(id){ document.getElementById(id).classList.add('active'); }
 function cerrar(id){ document.getElementById(id).classList.remove('active'); }
