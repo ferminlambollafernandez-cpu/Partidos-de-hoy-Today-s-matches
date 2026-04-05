@@ -406,7 +406,7 @@ async function guardarPartido() {
     ? await sb.from('partidos').update(obj).eq('id', editPId)
     : await sb.from('partidos').insert(obj)
   if (error) { console.error('guardar partido error:', error); return; 
- alert(error.message); // 👈 AGREGÁ ESTO
+ alert(error.message); // 👈 ESTO ES CLAVE
   return; 
 }
   cerrar('overlay-partido'); editPId = null; await cargarPartidos()
