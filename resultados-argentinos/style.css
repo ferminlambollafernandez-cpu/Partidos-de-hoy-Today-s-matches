@@ -31,3 +31,11 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .competition-tab{flex:0 0 auto;border:1px solid rgba(121,215,237,.15);border-radius:7px;background:rgba(10,27,38,.7);padding:10px 13px;color:#91a6af;font-size:8px;font-weight:900;letter-spacing:.8px;cursor:pointer;transition:color .2s,border-color .2s,background .2s}
 .competition-tab:hover{color:var(--white);border-color:rgba(121,215,237,.42)}
 .competition-tab.active{background:linear-gradient(135deg,rgba(121,215,237,.16),rgba(121,215,237,.07));border-color:var(--sky);color:var(--yellow);box-shadow:0 5px 20px rgba(48,180,212,.1)}
+
+/* Acceso rápido para saltar directamente a una fecha */
+.calendar-control{position:relative;display:grid;place-items:center;width:36px;height:34px;flex:0 0 36px;border:1px solid rgba(121,215,237,.24);border-radius:8px;background:linear-gradient(145deg,rgba(121,215,237,.1),rgba(10,27,38,.9));color:var(--sky);cursor:pointer;transition:transform .2s,border-color .2s,background .2s}
+.calendar-control:hover{transform:translateY(-1px);border-color:var(--yellow);background:rgba(255,211,72,.1)}
+.calendar-control svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.calendar-control input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.calendar-control:focus-within{outline:2px solid var(--yellow);outline-offset:2px}
+@media(max-width:700px){.calendar-control{width:32px;height:32px;flex-basis:32px}}
