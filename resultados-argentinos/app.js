@@ -241,6 +241,69 @@ function rowFromEntry(entry, index) {
   const rank = statValue(stats, ['rank', 'playoffrank']);
   return `<tr><td class="position">${safe(rank === '—' ? index + 1 : rank)}</td><td class="club"><span class="club-wrap">${logo}<span>${safe(team.displayName || team.name || 'Equipo')}</span></span></td><td class="points">${safe(statValue(stats, ['points', 'pts']))}</td><td>${safe(statValue(stats, ['gamesplayed', 'played', 'gp', 'matchesplayed']))}</td><td class="goal-difference">${safe(statValue(stats, ['goaldifferential', 'pointdifferential', 'goaldifference', 'gd']))}</td><td>${safe(statValue(stats, ['wins', 'w']))}</td><td>${safe(statValue(stats, ['ties', 'draws', 'd']))}</td><td>${safe(statValue(stats, ['losses', 'l']))}</td></tr>`;
 }
+function seasonTypeId(data) {
+  return String(data.season?.type?.id ?? data.seasonType?.id ?? data.seasontype ?? '');
+}
+function annualNumber(entry, aliases) {
+  const keys = aliases.map(name => name.toLowerCase().replace(/[^a-z]/g, ''));
+  const stat = (entry.stats || []).find(item => keys.includes(String(item.name || item.abbreviation || '').toLowerCase().replace(/[^a-z]/g, '')));
+  const value = Number(stat?.value ?? stat?.displayValue);
+  return Number.isFinite(value) ? value : null;
+}
+function combineAnnualTables(apertura, clausura) {
+  if (seasonTypeId(apertura) !== '5' || seasonTypeId(clausura) !== '6') return null;
+  const totals = new Map();
+  for (const source of [apertura, clausura]) {
+    const tables = collectStandingsTables(source);
+    if (!tables.length) return null;
+    for (const table of tables) for (const entry of table.entries) {
+      const team = entry.team || {};
+      const id = String(team.id || '');
+      const played = annualNumber(entry, ['gamesPlayed', 'played', 'gp']);
+      const wins = annualNumber(entry, ['wins', 'w']);
+      const draws = annualNumber(entry, ['ties', 'draws', 'd']);
+      const losses = annualNumber(entry, ['losses', 'l']);
+      const goalsFor = annualNumber(entry, ['pointsFor', 'goalsFor', 'gf']);
+      const goalsAgainst = annualNumber(entry, ['pointsAgainst', 'goalsAgainst', 'ga']);
+      const points = annualNumber(entry, ['points', 'pts']);
+      if (!id || [played, wins, draws, losses, goalsFor, goalsAgainst, points].some(value => value === null)) return null;
+      const total = totals.get(id) || { team, played: 0, wins: 0, draws: 0, losses: 0, goalsFor: 0, goalsAgainst: 0, points: 0 };
+      total.played += played;
+      total.wins += wins;
+      total.draws += draws;
+      total.losses += losses;
+      total.goalsFor += goalsFor;
+      total.goalsAgainst += goalsAgainst;
+      total.points += points;
+      totals.set(id, total);
+    }
+  }
+  const sorted = [...totals.values()].sort((a, b) => b.points - a.points || (b.goalsFor - b.goalsAgainst) - (a.goalsFor - a.goalsAgainst) || b.goalsFor - a.goalsFor);
+  return sorted.map((total, index) => {
+    const difference = total.goalsFor - total.goalsAgainst;
+    const stat = (name, value) => ({ name, value, displayValue: String(value) });
+    return { team: total.team, stats: [
+      stat('rank', index + 1), stat('points', total.points), stat('gamesPlayed', total.played),
+      { name: 'pointDifferential', value: difference, displayValue: `${difference > 0 ? '+' : ''}${difference}` },
+      stat('wins', total.wins), stat('ties', total.draws), stat('losses', total.losses),
+      stat('pointsFor', total.goalsFor), stat('pointsAgainst', total.goalsAgainst)
+    ] };
+  });
+}
+async function loadAnnualTable(year, currentData) {
+  const currentType = seasonTypeId(currentData);
+  if (currentType !== '5' && currentType !== '6') return null;
+  let apertura = currentType === '5' ? currentData : null;
+  let clausura = currentType === '6' ? currentData : null;
+  try {
+    if (!apertura) apertura = await fetchFromEspn(`/${ARG_LEAGUE}/standings?season=${year}&seasontype=5&region=ar&lang=es`, TABLE_BASE, TABLE_FALLBACK);
+    if (!clausura) clausura = await fetchFromEspn(`/${ARG_LEAGUE}/standings?season=${year}&seasontype=6&region=ar&lang=es`, TABLE_BASE, TABLE_FALLBACK);
+    return combineAnnualTables(apertura, clausura);
+  } catch (error) {
+    console.warn('La fuente no entregó las dos fases necesarias para la tabla anual.', error);
+    return null;
+  }
+}
 function renderStandings() {
   const tabs = document.querySelector('#standingsTabs');
   const body = document.querySelector('#standingsBody');
@@ -251,7 +314,7 @@ function renderStandings() {
   }
   state.activeTable = Math.min(state.activeTable, state.tables.length - 1);
   tabs.innerHTML = state.tables.map((table, index) => {
-    const title = table.name.replace(/group\s*a/i, 'Zona A').replace(/group\s*b/i, 'Zona B');
+    const title = table.name.replace(/(?:group|grupo)\s*a/i, 'Zona A').replace(/(?:group|grupo)\s*b/i, 'Zona B');
     return `<button class="table-tab ${index === state.activeTable ? 'active' : ''}" data-standings-index="${index}" role="tab" aria-selected="${index === state.activeTable}">${safe(title.toLocaleUpperCase('es-AR'))}</button>`;
   }).join('');
   body.innerHTML = state.tables[state.activeTable].entries.map(rowFromEntry).join('');
@@ -268,10 +331,12 @@ async function loadStandings() {
     const year = dateParts(todayKey()).year;
     const data = await fetchFromEspn(`/${ARG_LEAGUE}/standings?season=${year}&region=ar&lang=es`, TABLE_BASE, TABLE_FALLBACK);
     state.tables = collectStandingsTables(data);
+    const annual = await loadAnnualTable(year, data);
+    if (annual?.length) state.tables.push({ name: 'Tabla anual', entries: annual });
     renderStandings();
     const time = new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date());
-    document.querySelector('#tableCompetition').textContent = `${state.season?.type?.name || 'LIGA PROFESIONAL'} · ${year}`;
-    document.querySelector('#tableStatus').textContent = `Posiciones de ESPN · actualizado ${time}`;
+    document.querySelector('#tableCompetition').textContent = `${data.season?.type?.name || data.season?.displayName || 'LIGA PROFESIONAL'} · ${year}`;
+    document.querySelector('#tableStatus').textContent = `Posiciones de ESPN${annual?.length ? ' · anual suma Apertura y Clausura' : ''} · actualizado ${time}`;
   } catch (error) {
     console.error('No se pudo cargar la tabla de ESPN:', error);
     state.tables = [];
@@ -304,4 +369,3 @@ window.setInterval(() => {
   if (state.date === todayKey()) loadScores();
 }, 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
-
