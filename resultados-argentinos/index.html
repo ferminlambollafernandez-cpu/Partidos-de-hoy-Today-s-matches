@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07131d">
+  <title>Fútbol Argentino — Resultados y tablas</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#inicio" aria-label="Fútbol Argentino, inicio">
+      <span class="brand-mark"><i></i><b>FA</b><i></i></span>
+      <span class="brand-name">FÚTBOL<span>ARGENTINO</span></span>
+    </a>
+    <nav class="main-nav" aria-label="Navegación principal">
+      <a class="nav-link active" href="#resultados">PARTIDOS</a>
+      <a class="nav-link" href="#tablas">TABLAS</a>
+      <a class="nav-link" href="#ligas">COMPETENCIAS</a>
+    </nav>
+    <div class="live-pill"><span class="live-dot"></span> EN VIVO</div>
+  </header>
+
+  <main id="inicio">
+    <section class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="eyebrow-line"></span> EL FÚTBOL DE ACÁ</div>
+        <h1>Todo el fútbol.<br><em>En un solo lugar.</em></h1>
+        <p>Resultados, goles y posiciones de las competencias argentinas.</p>
+      </div>
+      <div class="hero-stats">
+        <div><strong>24</strong><span>EQUIPOS</span></div><i></i><div><strong>01</strong><span>PAÍS</span></div><i></i><div><strong>∞</strong><span>PASIÓN</span></div>
+      </div>
+      <div class="hero-sun"></div>
+    </section>
+
+    <div class="content-wrap">
+      <section class="datebar" aria-label="Elegir fecha">
+        <button class="date-arrow" id="prevDate" aria-label="Día anterior">‹</button>
+        <div class="date-center"><span class="date-label">FECHA SELECCIONADA</span><strong id="selectedDate">SÁBADO, 24 DE OCTUBRE</strong></div>
+        <button class="date-arrow" id="nextDate" aria-label="Día siguiente">›</button>
+        <button class="today-button" id="todayButton">HOY <span>↗</span></button>
+        <div class="date-divider"></div>
+        <div class="date-summary"><span class="live-dot"></span><strong>4</strong> PARTIDOS <span class="summary-sep">·</span> <strong>7</strong> GOLES</div>
+      </section>
+
+      <section id="resultados" class="section-block">
+        <div class="section-heading">
+          <div><span class="section-kicker">FECHA 13 · MARCADORES DE MUESTRA</span><h2>RESULTADOS <span>DEL DÍA</span></h2></div>
+          <div class="filter-tabs" role="group" aria-label="Filtrar partidos">
+            <button class="filter active" data-filter="all">TODOS <span>4</span></button>
+            <button class="filter" data-filter="finished">FINALIZADOS <span>2</span></button>
+            <button class="filter" data-filter="upcoming">PRÓXIMOS <span>2</span></button>
+          </div>
+        </div>
+        <div class="league-heading" id="ligas"><span class="league-icon">⚽</span><div><strong>LIGA PROFESIONAL</strong><small>TORNEO CLAUSURA · FECHA 13</small></div><a href="#tablas">VER TABLA <span>↗</span></a></div>
+        <div class="match-list" id="matchList"></div>
+      </section>
+
+      <section class="table-section" id="tablas">
+        <div class="table-title-row">
+          <div><span class="section-kicker">TORNEO CLAUSURA · 2026</span><h2>LA TABLA <span>DE POSICIONES</span></h2></div>
+          <a class="all-table-link" href="#tablaCompleta">TABLA COMPLETA <span>↗</span></a>
+        </div>
+        <div class="table-tabs" role="tablist" aria-label="Tipo de tabla">
+          <button class="table-tab active" data-table="zona-a" role="tab">ZONA A</button>
+          <button class="table-tab" data-table="zona-b" role="tab">ZONA B</button>
+          <button class="table-tab" data-table="anual" role="tab">TABLA ANUAL</button>
+        </div>
+        <div class="table-scroll" id="tablaCompleta">
+          <table>
+            <thead><tr><th class="position-col">#</th><th class="club-col">EQUIPO</th><th>PTS</th><th>PJ</th><th>DG</th><th>G</th><th>E</th><th>P</th></tr></thead>
+            <tbody id="standingsBody"></tbody>
+          </table>
+        </div>
+        <div class="table-legend"><span><i class="legend-blue"></i> CLASIFICACIÓN A PLAYOFFS</span><span>PTS Puntos · PJ Jugados · DG Diferencia de gol</span></div>
+      </section>
+      <footer><span class="footer-brand">FA<span>·</span></span><span>EL FÚTBOL ARGENTINO, COMO NOS GUSTA.</span><span class="footer-right">CELESTE Y BLANCO <i></i></span></footer>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
