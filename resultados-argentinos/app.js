@@ -485,6 +485,7 @@ document.querySelectorAll('.filter').forEach(button => button.addEventListener('
 }));
 function selectDate(date) {
   state.date = date;
+  document.querySelector('#datePicker').value = date;
   state.matches = [];
   state.feeds = [];
   state.scoresLoaded = false;
@@ -494,6 +495,11 @@ function selectDate(date) {
 document.querySelector('#prevDate').addEventListener('click', () => selectDate(shiftDate(state.date, -1)));
 document.querySelector('#nextDate').addEventListener('click', () => selectDate(shiftDate(state.date, 1)));
 document.querySelector('#todayButton').addEventListener('click', () => selectDate(todayKey()));
+const datePicker = document.querySelector('#datePicker');
+datePicker.value = state.date;
+datePicker.addEventListener('change', () => {
+  if (datePicker.value) selectDate(datePicker.value);
+});
 loadAll();
 window.setInterval(() => {
   if (state.date === todayKey()) loadScores();
