@@ -13,12 +13,34 @@ const LEAGUES = [
   { id: 'conmebol.libertadores', path: 'soccer/conmebol.libertadores', name: 'COPA LIBERTADORES', icon: '🌎' },
   { id: 'conmebol.sudamericana', path: 'soccer/conmebol.sudamericana', name: 'COPA SUDAMERICANA', icon: '🟡' }
 ];
-const OFFICIAL_FINALS = {
+const OFFICIAL_SCHEDULES = {
+  '2026-11-03': {
+    'uefa.champions': {
+      label: 'JORNADA 4 · FASE DE LIGA',
+      matches: [
+        { home: 'Shakhtar Donetsk', away: 'Sporting CP', kickoff: '2026-11-03T17:45:00Z' },
+        { home: 'Galatasaray', away: 'Stuttgart', kickoff: '2026-11-03T17:45:00Z' },
+        { home: 'Atlético de Madrid', away: 'Bayern München', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'Barcelona', away: 'Aston Villa', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'Feyenoord', away: 'Inter', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'Bodø/Glimt', away: 'Lille', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'LASK', away: 'Slovan Bratislava', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'Manchester United', away: 'Roma', kickoff: '2026-11-03T20:00:00Z' },
+        { home: 'Villarreal', away: 'Paris Saint-Germain', kickoff: '2026-11-03T20:00:00Z' }
+      ]
+    }
+  },
   '2026-11-21': {
-    'conmebol.sudamericana': { home: 'Boca Juniors', away: 'Atlético Mineiro', venue: 'BARRANQUILLA' }
+    'conmebol.sudamericana': {
+      label: 'FINAL · BARRANQUILLA',
+      matches: [{ home: 'Boca Juniors', away: 'Atlético Mineiro' }]
+    }
   },
   '2026-11-28': {
-    'conmebol.libertadores': { home: 'Estudiantes de La Plata', away: 'Palmeiras', venue: 'MONTEVIDEO' }
+    'conmebol.libertadores': {
+      label: 'FINAL · MONTEVIDEO',
+      matches: [{ home: 'Estudiantes de La Plata', away: 'Palmeiras' }]
+    }
   }
 };
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
@@ -39,27 +61,69 @@ function shiftDate(key, days) {
   return date.toISOString().slice(0, 10);
 }
 function espnDate(key) { return key.replaceAll('-', ''); }
-function officialFinalEvent(date, league) {
-  const fixture = OFFICIAL_FINALS[date]?.[league.id];
-  if (!fixture || date < todayKey()) return null;
+function normalizedTeamName(value = '') {
+  const key = String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const aliases = {
+    atleticomg: 'atleticomineiro',
+    estudiantes: 'estudiantesdelaplata',
+    shakhtar: 'shakhtardonetsk',
+    atleticodemadrid: 'atleticomadrid',
+    bayernmunchen: 'bayernmunich',
+    sportinglisbon: 'sportingcp',
+    psg: 'parissaintgermain',
+    paris: 'parissaintgermain',
+    intermilan: 'inter',
+    fcintermilan: 'inter',
+    slovan: 'slovanbratislava'
+  };
+  return aliases[key] || key;
+}
+function eventTeamNames(competitor) {
+  const team = competitor?.team || {};
+  return [team.displayName, team.name, team.location, team.shortDisplayName, team.abbreviation]
+    .filter(Boolean).map(normalizedTeamName);
+}
+function officialScheduleEvents(date, league) {
+  const schedule = OFFICIAL_SCHEDULES[date]?.[league.id];
+  if (!schedule || date < todayKey()) return [];
   const team = (name, side, abbreviation) => ({
     type: 'team',
     homeAway: side,
     team: { name, displayName: name, shortDisplayName: name, abbreviation }
   });
-  return {
-    id: `official-final-${league.id}-${date}`,
+  return schedule.matches.map((fixture, index) => ({
+    id: `official-schedule-${league.id}-${date}-${index + 1}`,
     name: `${fixture.home} vs ${fixture.away}`,
+    date: fixture.kickoff,
     _leagueId: league.id,
-    _officialSchedule: `FINAL · ${fixture.venue}`,
+    _officialSchedule: schedule.label,
     competitions: [{
-      status: { type: { name: 'STATUS_SCHEDULED', state: 'pre', detail: 'HORA A CONFIRMAR' } },
+      status: { type: { name: 'STATUS_SCHEDULED', state: 'pre', detail: fixture.kickoff ? 'Scheduled' : 'HORA A CONFIRMAR' } },
       competitors: [
-        team(fixture.home, 'home', fixture.home.split(/\\s+/).map(word => word[0]).join('').slice(0, 3)),
-        team(fixture.away, 'away', fixture.away.split(/\\s+/).map(word => word[0]).join('').slice(0, 3))
+        team(fixture.home, 'home', fixture.home.split(/\s+/).map(word => word[0]).join('').slice(0, 3)),
+        team(fixture.away, 'away', fixture.away.split(/\s+/).map(word => word[0]).join('').slice(0, 3))
       ]
     }]
-  };
+  }));
+}
+function mergeOfficialSchedule(date, league, events) {
+  const officialEvents = officialScheduleEvents(date, league);
+  if (!officialEvents.length) return events;
+  const merged = [...events];
+  for (const fixture of officialEvents) {
+    const competitors = fixture.competitions[0].competitors;
+    const expectedHome = normalizedTeamName(competitors[0].team.name);
+    const expectedAway = normalizedTeamName(competitors[1].team.name);
+    const exists = merged.some(event => {
+      const { home, away } = getParticipants(event);
+      const homeNames = eventTeamNames(home);
+      const awayNames = eventTeamNames(away);
+      return homeNames.includes(expectedHome) && awayNames.includes(expectedAway)
+        || homeNames.includes(expectedAway) && awayNames.includes(expectedHome);
+    });
+    if (!exists) merged.push(fixture);
+  }
+  return merged;
 }
 function formatDate(key) {
   const { year, month, day } = dateParts(key);
@@ -213,14 +277,10 @@ async function loadScores() {
       try {
         const data = await fetchFromEspn(`/${league.path}/scoreboard?dates=${date}&limit=100&region=ar&lang=es`);
         const events = Array.isArray(data.events) ? data.events.map(event => ({ ...event, _leagueId: league.id })) : [];
-        if (!events.length) {
-          const officialFinal = officialFinalEvent(state.date, league);
-          if (officialFinal) events.push(officialFinal);
-        }
-        return { league, data, events, error: false };
+        return { league, data, events: mergeOfficialSchedule(state.date, league, events), error: false };
       } catch (error) {
-        const officialFinal = officialFinalEvent(state.date, league);
-        return { league, data: null, events: officialFinal ? [officialFinal] : [], error: !officialFinal };
+        const events = mergeOfficialSchedule(state.date, league, []);
+        return { league, data: null, events, error: !events.length };
       }
     }));
     if (feeds.every(feed => feed.error)) throw new Error('No se pudo obtener información de ninguna liga.');
@@ -234,7 +294,7 @@ async function loadScores() {
     const cadence = state.date === todayKey() ? ' · se actualiza cada minuto' : '';
     const failedFeeds = feeds.filter(feed => feed.error).length;
     if (failedFeeds) setLivePill('DATOS PARCIALES', 'error');
-    const officialScheduleNote = feeds.some(feed => feed.events.some(event => event._officialSchedule)) ? ' · finales del calendario oficial' : '';
+    const officialScheduleNote = feeds.some(feed => feed.events.some(event => event._officialSchedule)) ? ' · calendario oficial como respaldo' : '';
     setFeedStatus(`Actualizado ${time} · ${state.matches.length} partidos${officialScheduleNote}${failedFeeds ? ` · ${failedFeeds} ligas sin conexión` : cadence}`, failedFeeds ? 'error' : 'ok');
   } catch (error) {
     console.error('No se pudieron cargar los partidos de ESPN:', error);
@@ -438,4 +498,7 @@ loadAll();
 window.setInterval(() => {
   if (state.date === todayKey()) loadScores();
 }, 60_000);
+window.setInterval(() => {
+  if (state.date !== todayKey()) loadScores();
+}, 15 * 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
