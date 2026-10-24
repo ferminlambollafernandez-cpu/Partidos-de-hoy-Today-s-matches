@@ -13,6 +13,14 @@ const LEAGUES = [
   { id: 'conmebol.libertadores', path: 'soccer/conmebol.libertadores', name: 'COPA LIBERTADORES', icon: '🌎' },
   { id: 'conmebol.sudamericana', path: 'soccer/conmebol.sudamericana', name: 'COPA SUDAMERICANA', icon: '🟡' }
 ];
+const OFFICIAL_FINALS = {
+  '2026-11-21': {
+    'conmebol.sudamericana': { home: 'Boca Juniors', away: 'Atlético Mineiro', venue: 'BARRANQUILLA' }
+  },
+  '2026-11-28': {
+    'conmebol.libertadores': { home: 'Estudiantes de La Plata', away: 'Palmeiras', venue: 'MONTEVIDEO' }
+  }
+};
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
 const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false };
 
@@ -31,6 +39,28 @@ function shiftDate(key, days) {
   return date.toISOString().slice(0, 10);
 }
 function espnDate(key) { return key.replaceAll('-', ''); }
+function officialFinalEvent(date, league) {
+  const fixture = OFFICIAL_FINALS[date]?.[league.id];
+  if (!fixture || date < todayKey()) return null;
+  const team = (name, side, abbreviation) => ({
+    type: 'team',
+    homeAway: side,
+    team: { name, displayName: name, shortDisplayName: name, abbreviation }
+  });
+  return {
+    id: `official-final-${league.id}-${date}`,
+    name: `${fixture.home} vs ${fixture.away}`,
+    _leagueId: league.id,
+    _officialSchedule: `FINAL · ${fixture.venue}`,
+    competitions: [{
+      status: { type: { name: 'STATUS_SCHEDULED', state: 'pre', detail: 'HORA A CONFIRMAR' } },
+      competitors: [
+        team(fixture.home, 'home', fixture.home.split(/\\s+/).map(word => word[0]).join('').slice(0, 3)),
+        team(fixture.away, 'away', fixture.away.split(/\\s+/).map(word => word[0]).join('').slice(0, 3))
+      ]
+    }]
+  };
+}
 function formatDate(key) {
   const { year, month, day } = dateParts(key);
   return new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, day, 12)));
@@ -142,7 +172,8 @@ function renderMatches() {
     list.innerHTML = state.feeds.map(feed => {
       const feedMatches = state.filter === 'all' ? feed.events : feed.events.filter(event => matchState(event) === state.filter);
       if (state.filter !== 'all' && !feedMatches.length) return '';
-      const seasonName = feed.data?.leagues?.[0]?.season?.type?.name || 'PARTIDOS DEL DÍA';
+      const officialEvent = feed.events.find(event => event._officialSchedule);
+      const seasonName = officialEvent?._officialSchedule || feed.data?.leagues?.[0]?.season?.type?.name || 'PARTIDOS DEL DÍA';
       const content = feed.error
         ? '<div class="empty-state error">No se pudieron cargar los partidos de esta liga.<br><button type="button" class="retry-feed">Reintentar</button></div>'
         : feedMatches.length ? feedMatches.map(renderMatch).join('')
@@ -182,9 +213,14 @@ async function loadScores() {
       try {
         const data = await fetchFromEspn(`/${league.path}/scoreboard?dates=${date}&limit=100&region=ar&lang=es`);
         const events = Array.isArray(data.events) ? data.events.map(event => ({ ...event, _leagueId: league.id })) : [];
+        if (!events.length) {
+          const officialFinal = officialFinalEvent(state.date, league);
+          if (officialFinal) events.push(officialFinal);
+        }
         return { league, data, events, error: false };
       } catch (error) {
-        return { league, data: null, events: [], error: true };
+        const officialFinal = officialFinalEvent(state.date, league);
+        return { league, data: null, events: officialFinal ? [officialFinal] : [], error: !officialFinal };
       }
     }));
     if (feeds.every(feed => feed.error)) throw new Error('No se pudo obtener información de ninguna liga.');
@@ -198,7 +234,8 @@ async function loadScores() {
     const cadence = state.date === todayKey() ? ' · se actualiza cada minuto' : '';
     const failedFeeds = feeds.filter(feed => feed.error).length;
     if (failedFeeds) setLivePill('DATOS PARCIALES', 'error');
-    setFeedStatus(`Actualizado ${time} · ${state.matches.length} partidos${failedFeeds ? ` · ${failedFeeds} ligas sin conexión` : cadence}`, failedFeeds ? 'error' : 'ok');
+    const officialScheduleNote = feeds.some(feed => feed.events.some(event => event._officialSchedule)) ? ' · finales del calendario oficial' : '';
+    setFeedStatus(`Actualizado ${time} · ${state.matches.length} partidos${officialScheduleNote}${failedFeeds ? ` · ${failedFeeds} ligas sin conexión` : cadence}`, failedFeeds ? 'error' : 'ok');
   } catch (error) {
     console.error('No se pudieron cargar los partidos de ESPN:', error);
     if (!state.scoresLoaded) {
