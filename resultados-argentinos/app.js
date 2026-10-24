@@ -139,7 +139,7 @@ function renderMatches() {
       if (state.filter !== 'all' && !feedMatches.length) return '';
       const seasonName = feed.data?.leagues?.[0]?.season?.type?.name || 'PARTIDOS DEL DÍA';
       const content = feed.error
-        ? '<div class="empty-state error">No se pudieron cargar los partidos de esta liga.</div>'
+        ? '<div class="empty-state error">No se pudieron cargar los partidos de esta liga.<br><button type="button" class="retry-feed">Reintentar</button></div>'
         : feedMatches.length ? feedMatches.map(renderMatch).join('')
           : `<div class="empty-state">${safe(state.filter === 'all' ? `No hay partidos programados para ${feed.league.name} en esta fecha.` : labels[state.filter])}</div>`;
       const tableLink = feed.league.id === 'arg.1' ? '<a href="#tablas">VER TABLA <span>↗</span></a>' : '';
@@ -160,6 +160,7 @@ function renderMatches() {
   document.querySelector('#dayGoals').textContent = goalCount;
   const liveCount = state.matches.filter(event => matchState(event) === 'live').length;
   if (state.scoresLoaded) setLivePill(liveCount ? `${liveCount} EN JUEGO` : 'DATOS ACTUALIZADOS');
+  list.querySelectorAll('.retry-feed').forEach(button => button.addEventListener('click', loadScores));
 }
 async function loadScores() {
   document.querySelector('#selectedDate').textContent = formatDate(state.date).toLocaleUpperCase('es-AR');
@@ -187,6 +188,7 @@ async function loadScores() {
     const time = new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date());
     const cadence = state.date === todayKey() ? ' · se actualiza cada minuto' : '';
     const failedFeeds = feeds.filter(feed => feed.error).length;
+    if (failedFeeds) setLivePill('DATOS PARCIALES', 'error');
     setFeedStatus(`Actualizado ${time} · ${state.matches.length} partidos${failedFeeds ? ` · ${failedFeeds} ligas sin conexión` : cadence}`, failedFeeds ? 'error' : 'ok');
   } catch (error) {
     console.error('No se pudieron cargar los partidos de ESPN:', error);
@@ -302,3 +304,4 @@ window.setInterval(() => {
   if (state.date === todayKey()) loadScores();
 }, 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
+
