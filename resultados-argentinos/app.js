@@ -7,6 +7,8 @@ const LEAGUES = [
   { id: 'arg.1', path: 'soccer/arg.1', name: 'LIGA PROFESIONAL', icon: '🇦🇷' },
   { id: 'eng.1', path: 'soccer/eng.1', name: 'PREMIER LEAGUE', icon: '🏴' },
   { id: 'esp.1', path: 'soccer/esp.1', name: 'LA LIGA', icon: '🇪🇸' },
+  { id: 'usa.1', path: 'soccer/usa.1', name: 'MLS', icon: '🇺🇸' },
+  { id: 'bra.1', path: 'soccer/bra.1', name: 'BRASILEIRÃO', icon: '🇧🇷' },
   { id: 'uefa.champions', path: 'soccer/uefa.champions', name: 'CHAMPIONS LEAGUE', icon: '🏆' },
   { id: 'uefa.europa', path: 'soccer/uefa.europa', name: 'EUROPA LEAGUE', icon: '🟠' },
   { id: 'uefa.europa.conf', path: 'soccer/uefa.europa.conf', name: 'CONFERENCE LEAGUE', icon: '🟣' },
