@@ -122,6 +122,23 @@ function notifyMatchDetailChanges(matchId, summary, event) {
   }
   state.detailSnapshots[matchId] = next;
 }
+async function refreshFollowedLiveCards(matches) {
+  const tracked = matches.filter(event => {
+    const id = String(event.id || '');
+    return id && state.followedMatchIds.has(id) && id !== state.selectedMatchId && !state.cardFetches.has(id)
+      && !id.startsWith('official-schedule-') && matchState(event) === 'live';
+  });
+  await Promise.all(tracked.map(async event => {
+    const id = String(event.id);
+    const league = LEAGUES.find(item => item.id === event._leagueId) || LEAGUES[0];
+    state.cardFetches.add(id);
+    try {
+      const summary = await fetchFromEspn('/' + league.path + '/summary?event=' + encodeURIComponent(id) + '&region=ar&lang=es');
+      notifyMatchDetailChanges(id, summary, event);
+    } catch { /* Se vuelve a intentar en la próxima actualización del marcador. */ }
+    finally { state.cardFetches.delete(id); }
+  }));
+}
 function metricValue(statistics, aliases) {
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const names = aliases.map(normalize);
@@ -160,7 +177,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {} };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set() };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -913,6 +930,7 @@ async function loadScores() {
     state.feeds = feeds;
     state.matches = nextMatches;
     state.matchSnapshotsInitialized = true;
+    refreshFollowedLiveCards(nextMatches);
     state.scoresLoaded = true;
     state.season = feeds.find(feed => feed.league.id === 'arg.1')?.data?.leagues?.[0]?.season || state.season;
     document.querySelector('#competitionLabel').textContent = 'ARGENTINA · EUROPA · SUDAMÉRICA · ESPN';
