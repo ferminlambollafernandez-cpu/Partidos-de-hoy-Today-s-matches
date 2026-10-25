@@ -323,6 +323,26 @@ function statValue(stats, names) {
   }
   return '—';
 }
+function numericStat(entry, names) {
+  const value = statValue(normalizedStats(entry), names);
+  if (value === '—') return null;
+  const parsed = Number(String(value).replace(/\s/g, '').replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function compareStandingsEntries(a, b) {
+  const tieBreakers = [
+    ['points', 'pts'],
+    ['goaldifferential', 'pointdifferential', 'goaldifference', 'gd'],
+    ['goalsfor', 'pointsfor', 'gf'],
+    ['wins', 'w']
+  ];
+  for (const names of tieBreakers) {
+    const aValue = numericStat(a, names);
+    const bValue = numericStat(b, names);
+    if (aValue !== null && bValue !== null && aValue !== bValue) return bValue - aValue;
+  }
+  return 0;
+}
 function collectStandingsTables(data) {
   const tables = [];
   function walk(node, inheritedName = '') {
@@ -341,12 +361,12 @@ function collectStandingsTables(data) {
   if (!tables.length && Array.isArray(data.entries)) tables.push({ name: 'Tabla general', entries: data.entries });
   return tables;
 }
-function rowFromEntry(entry, index) {
+function rowFromEntry(entry, index, sequentialRank = false) {
   const team = entry.team || {};
   const stats = normalizedStats(entry);
   const abbreviation = team.abbreviation || team.name?.split(/\s+/).map(word => word[0]).join('').slice(0, 3) || 'FC';
   const logo = team.logo && /^https:\/\//i.test(team.logo) ? `<img class="club-logo" src="${safe(team.logo)}" alt="" loading="lazy">` : `<span class="club-crest">${safe(abbreviation)}</span>`;
-  const rank = statValue(stats, ['rank', 'playoffrank']);
+  const rank = sequentialRank ? index + 1 : statValue(stats, ['rank', 'playoffrank']);
   return `<tr><td class="position">${safe(rank === '—' ? index + 1 : rank)}</td><td class="club"><span class="club-wrap">${logo}<span>${safe(team.displayName || team.name || 'Equipo')}</span></span></td><td class="points">${safe(statValue(stats, ['points', 'pts']))}</td><td>${safe(statValue(stats, ['gamesplayed', 'played', 'gp', 'matchesplayed']))}</td><td class="goal-difference">${safe(statValue(stats, ['goaldifferential', 'pointdifferential', 'goaldifference', 'gd']))}</td><td>${safe(statValue(stats, ['wins', 'w']))}</td><td>${safe(statValue(stats, ['ties', 'draws', 'd']))}</td><td>${safe(statValue(stats, ['losses', 'l']))}</td></tr>`;
 }
 function seasonTypeId(data) {
@@ -438,7 +458,11 @@ function renderStandings() {
     const title = table.name.replace(/(?:group|grupo)\s*a/i, 'Zona A').replace(/(?:group|grupo)\s*b/i, 'Zona B');
     return `<button class="table-tab ${index === state.activeTable ? 'active' : ''}" data-standings-index="${index}" role="tab" aria-selected="${index === state.activeTable}">${safe(title.toLocaleUpperCase('es-AR'))}</button>`;
   }).join('');
-  body.innerHTML = tableData[state.activeTable].entries.map(rowFromEntry).join('');
+  const selectedTable = tableData[state.activeTable];
+  const isAnnual = /(?:tabla\s*anual|annual)/i.test(selectedTable.name || '');
+  const isArgentinaZones = state.activeStandings === 'arg.1' && !isAnnual && tableData.length > 1;
+  const entries = isArgentinaZones ? [...selectedTable.entries].sort(compareStandingsEntries) : selectedTable.entries;
+  body.innerHTML = entries.map((entry, index) => rowFromEntry(entry, index, isArgentinaZones)).join('');
   const clubCount = new Set(tableData.flatMap(table => table.entries.map(entry => String(entry.team?.id || entry.team?.name || '')))).size;
   document.querySelector('#teamCount').textContent = clubCount || '—';
   tabs.querySelectorAll('[data-standings-index]').forEach(button => button.addEventListener('click', () => {
