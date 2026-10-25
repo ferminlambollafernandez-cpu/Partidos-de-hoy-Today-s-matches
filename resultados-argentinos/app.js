@@ -47,7 +47,6 @@ const OFFICIAL_SCHEDULES = {
 };
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
 const FOLLOWED_MATCHES_KEY = 'futbol-argentino-followed-v1';
-const PRODE_PREDICTIONS_KEY = 'futbol-argentino-prode-v1';
 function readLocalData(key, fallback) {
   try {
     const value = JSON.parse(localStorage.getItem(key) || 'null');
@@ -123,31 +122,6 @@ function notifyMatchDetailChanges(matchId, summary, event) {
   }
   state.detailSnapshots[matchId] = next;
 }
-function settleProdePredictions(events) {
-  let changed = false;
-  events.forEach(event => {
-    const prediction = state.prodePredictions[String(event.id || '')];
-    if (!prediction || prediction.points != null || matchState(event) !== 'finished') return;
-    const [home, away] = eventScore(event);
-    if (!Number.isFinite(home) || !Number.isFinite(away)) return;
-    const predictedHome = Number(prediction.home), predictedAway = Number(prediction.away);
-    prediction.points = predictedHome === home && predictedAway === away ? 3
-      : Math.sign(predictedHome - predictedAway) === Math.sign(home - away) ? 1 : 0;
-    prediction.actualHome = home; prediction.actualAway = away; changed = true;
-  });
-  if (changed) writeLocalData(PRODE_PREDICTIONS_KEY, state.prodePredictions);
-}
-function prodeMonthForDate(value) {
-  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit' })
-    .formatToParts(new Date(value)).map(part => [part.type, part.value]));
-  return parts.year + '-' + parts.month;
-}
-function currentProdeMonth() { return prodeMonthForDate(new Date()); }
-function monthlyProdePoints() {
-  const month = currentProdeMonth();
-  return Object.values(state.prodePredictions).filter(item => item.month === month && item.points != null)
-    .reduce((total, item) => total + Number(item.points || 0), 0);
-}
 function metricValue(statistics, aliases) {
   const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
   const names = aliases.map(normalize);
@@ -186,23 +160,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-function renderProde(event) {
-  const id = String(event.id || ''), prediction = state.prodePredictions[id], phase = matchState(event);
-  const kickoff = Date.parse(event.date || getCompetition(event).date || '');
-  const locked = phase !== 'upcoming' || (Number.isFinite(kickoff) && kickoff <= Date.now());
-  if (locked && !prediction) return '';
-  const { home, away } = getParticipants(event);
-  const homeName = home.team?.shortDisplayName || home.team?.displayName || 'Local';
-  const awayName = away.team?.shortDisplayName || away.team?.displayName || 'Visitante';
-  const result = prediction?.points != null ? ' · ' + prediction.points + ' PTS' : prediction ? ' · GUARDADO' : '';
-  const body = prediction
-    ? '<div class="prode-saved">Tu pronóstico: <b>' + safe(prediction.home) + ' – ' + safe(prediction.away) + '</b>' + safe(result) + '</div>'
-    : '<form class="prode-form" data-prode-form><label><span>' + safe(homeName) + '</span><input name="home" type="number" min="0" max="15" inputmode="numeric" required aria-label="Goles de ' + safe(homeName) + '"></label><b>–</b><label><span>' + safe(awayName) + '</span><input name="away" type="number" min="0" max="15" inputmode="numeric" required aria-label="Goles de ' + safe(awayName) + '"></label><button type="button" data-save-prode="' + safe(id) + '">GUARDAR</button></form>';
-  return '<section class="detail-section prode-section"><div class="detail-section-title"><h4>PRODE GRATIS</h4><span>' + (locked ? 'CERRADO' : 'ANTES DEL PARTIDO') + '</span></div>' + body
-    + '<div class="prode-monthly"><strong>' + monthlyProdePoints() + ' PTS</strong><span>RANKING PERSONAL · ' + safe(currentProdeMonth()) + '</span></div>'
-    + '<p class="alert-limit-note">Guardado en este dispositivo · exacto: 3 pts · ganador o empate: 1 pt.</p></section>';
-}
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), prodePredictions: readLocalData(PRODE_PREDICTIONS_KEY, {}), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {} };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {} };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -708,7 +666,7 @@ function renderMatchDetails(event) {
   const awayLink = teamProfileButton(away, 'away', awayName);
   return '<aside class="match-details" aria-label="Detalle del partido">'
     + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
-    + renderFollowControls(event) + renderProde(event) + renderAdvancedStats(event)
+    + renderFollowControls(event) + renderAdvancedStats(event)
     + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
     + '<section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>' + substitutions.length + '</span></div>' + substitutionsContent + '</section>'
     + '</aside>';
@@ -824,22 +782,6 @@ function renderMatches() {
     renderMatches();
   }));
   list.querySelector('[data-enable-alerts]')?.addEventListener('click', enableMatchAlerts);
-  list.querySelectorAll('[data-save-prode]').forEach(button => button.addEventListener('click', () => {
-    const form = list.querySelector('[data-prode-form]');
-    if (!form?.reportValidity()) return;
-    const home = Number(form.elements.namedItem('home')?.value);
-    const away = Number(form.elements.namedItem('away')?.value);
-    if (!Number.isInteger(home) || !Number.isInteger(away)) return;
-    const id = button.dataset.saveProde;
-    const event = state.matches.find(item => String(item.id) === id);
-    if (!event) return;
-    const kickoff = Date.parse(event.date || getCompetition(event).date || '');
-    if (matchState(event) !== 'upcoming' || (Number.isFinite(kickoff) && kickoff <= Date.now())) return;
-    const month = Number.isFinite(kickoff) ? prodeMonthForDate(kickoff) : currentProdeMonth();
-    state.prodePredictions[id] = { home, away, month, savedAt: new Date().toISOString() };
-    writeLocalData(PRODE_PREDICTIONS_KEY, state.prodePredictions);
-    renderMatches();
-  }));
   list.querySelectorAll('[data-team-profile]').forEach(button => button.addEventListener('click', () => {
     const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
     if (!event) return;
@@ -968,7 +910,6 @@ async function loadScores() {
     const previousMatches = state.matches;
     const nextMatches = feeds.flatMap(feed => feed.events);
     if (state.matchSnapshotsInitialized) notifyFollowedMatchChanges(previousMatches, nextMatches);
-    settleProdePredictions(nextMatches);
     state.feeds = feeds;
     state.matches = nextMatches;
     state.matchSnapshotsInitialized = true;
