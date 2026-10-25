@@ -46,7 +46,7 @@ const OFFICIAL_SCHEDULES = {
   }
 };
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0 };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0 };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -348,10 +348,159 @@ function collectSubstitutions(payload, event) {
   roots.forEach(root => visit(root));
   return items;
 }
-function renderLineupSide(title, players) {
-  return `<div class="lineup-side"><h5>${safe(title)}</h5><ol>${players.map(player => `<li><b>${safe(player.jersey || '·')}</b><span title="${safe(player.name)}">${safe(player.name)}<small>${safe(player.position)}</small></span></li>`).join('')}</ol></div>`;
+function collectRosterPlayers(payload) {
+  const players = [];
+  const seen = new Set();
+  const childKeys = ['athletes', 'items', 'players', 'roster', 'entries'];
+  function positionName(value) {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    return value.displayName || value.name || value.abbreviation || value.shortName || '';
+  }
+  function visit(value, inheritedPosition = '', depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 10) return;
+    if (Array.isArray(value)) {
+      value.forEach(item => visit(item, inheritedPosition, depth + 1));
+      return;
+    }
+    const position = positionName(value.position) || value.positionName || inheritedPosition;
+    const hasChildren = childKeys.some(key => value[key] && typeof value[key] === 'object');
+    const person = value.athlete || value.player || value.person || value;
+    const name = person.displayName || person.fullName || person.name
+      || [person.firstName, person.lastName].filter(Boolean).join(' ');
+    const playerLike = Boolean(value.athlete || value.player || value.person || value.jersey
+      || value.headshot || value.firstName || value.lastName || ((value.id || value.uid) && name && !hasChildren));
+    if (name && playerLike && !hasChildren) {
+      const id = String(person.id || person.uid || value.id || value.uid || name + '|' + (value.jersey || person.jersey || ''));
+      if (!seen.has(id)) {
+        seen.add(id);
+        const playerPosition = positionName(person.position) || positionName(value.position) || value.positionName || inheritedPosition;
+        const positionCode = person.position?.abbreviation || value.position?.abbreviation || value.positionCode || '';
+        players.push({
+          id,
+          name,
+          jersey: value.jersey || value.jerseyNumber || person.jersey || person.jerseyNumber || '',
+          position: playerPosition,
+          positionCode
+        });
+      }
+    }
+    for (const key of childKeys) {
+      if (value[key] && typeof value[key] === 'object') visit(value[key], position, depth + 1);
+    }
+  }
+  [payload?.athletes, payload?.roster, payload?.team?.athletes, payload?.team?.roster, payload?.items]
+    .forEach(source => visit(source));
+  return players;
+}
+function rosterPositionGroup(player) {
+  const code = String(player.positionCode || '').trim().toUpperCase();
+  const text = (String(player.position || '') + ' ' + code).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (['g', 'gk', 'goalkeeper'].includes(code) || /goalkeeper|keeper|arquero|portero/.test(text)) return 'ARQUEROS';
+  if (['d', 'df', 'def'].includes(code) || /defender|defensa|centre.?back|center.?back|full.?back|lateral/.test(text) || ['cb', 'lb', 'rb', 'lwb', 'rwb'].includes(code.toLowerCase())) return 'DEFENSORES';
+  if (['m', 'mf', 'mid'].includes(code) || /midfielder|mediocampista|volante|centrocampista/.test(text) || ['cm', 'dm', 'am', 'cdm', 'cam', 'rm', 'lm'].includes(code.toLowerCase())) return 'MEDIOCAMPISTAS';
+  if (['f', 'fw', 'forward'].includes(code) || /forward|attacker|delantero|striker|winger/.test(text) || ['st', 'cf', 'lw', 'rw'].includes(code.toLowerCase())) return 'DELANTEROS';
+  return player.position ? 'OTROS' : 'SIN POSICIÓN';
+}
+function groupRoster(players) {
+  const order = ['ARQUEROS', 'DEFENSORES', 'MEDIOCAMPISTAS', 'DELANTEROS', 'OTROS', 'SIN POSICIÓN'];
+  const groups = new Map(order.map(name => [name, []]));
+  players.forEach(player => groups.get(rosterPositionGroup(player)).push(player));
+  return order.map(name => ({
+    name,
+    players: groups.get(name).sort((a, b) => a.position.localeCompare(b.position, 'es') || a.name.localeCompare(b.name, 'es'))
+  })).filter(group => group.players.length);
+}
+function profileTeamMatches(competitor, profile) {
+  const team = competitor?.team || competitor || {};
+  const id = String(team.id || competitor?.id || '');
+  if (id && profile.teamId && id === String(profile.teamId)) return true;
+  const profileNames = [
+    profile.team?.displayName, profile.team?.name, profile.team?.location,
+    profile.team?.shortDisplayName, profile.team?.abbreviation
+  ].filter(Boolean).map(normalizedTeamName);
+  return eventTeamNames(competitor).some(name => profileNames.includes(name));
+}
+function teamScheduleEvents(schedule, profile) {
+  const events = schedule?.events || schedule?.schedule?.events || schedule?.team?.events || schedule?.items || [];
+  if (!Array.isArray(events)) return [];
+  return [...new Map(events
+    .filter(event => {
+      const date = event.date || getCompetition(event).date;
+      const timestamp = Date.parse(date || '');
+      if (!Number.isFinite(timestamp) || timestamp < Date.now() - 60_000 || matchState(event) !== 'upcoming') return false;
+      return true;
+    })
+    .sort((a, b) => Date.parse(a.date || getCompetition(a).date) - Date.parse(b.date || getCompetition(b).date))
+    .map(event => [String(event.id || event.date + event.name), event])).values()];
+}
+function shortFixtureDate(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'A CONFIRMAR';
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, day: '2-digit', month: '2-digit' }).format(date);
+}
+function renderTeamUpcoming(profile) {
+  if (state.teamProfileLoading && !profile.schedule) return '<div class="detail-note">Buscando los próximos partidos…</div>';
+  if (profile.scheduleError && !profile.schedule) return '<div class="detail-note">No se pudo cargar el calendario de este equipo.</div>';
+  const fixtures = teamScheduleEvents(profile.schedule, profile);
+  if (!fixtures.length) return '<div class="detail-note">Todavía no hay próximos partidos publicados para este equipo.</div>';
+  return '<div class="team-fixture-table"><div class="team-fixture-heading"><span>DÍA</span><span>L/V</span><span>VS EQUIPO</span><span>HORA</span></div>'
+    + fixtures.map(event => {
+      const { home, away } = getParticipants(event);
+      const isHome = profileTeamMatches(home, profile);
+      const opponent = isHome ? away : home;
+      const opponentTeam = opponent.team || opponent;
+      const opponentName = opponentTeam.shortDisplayName || opponentTeam.displayName || opponentTeam.name || 'Rival';
+      const date = event.date || getCompetition(event).date;
+      const logo = opponentTeam.logo && /^https:\/\//i.test(opponentTeam.logo)
+        ? '<img src="' + safe(opponentTeam.logo) + '" alt="" loading="lazy">'
+        : '<span class="fixture-crest">' + safe(opponentTeam.abbreviation || 'FC') + '</span>';
+      return '<div class="team-fixture-row"><span>' + safe(shortFixtureDate(date)) + '</span><b class="fixture-venue">' + (isHome ? 'L' : 'V') + '</b><span class="fixture-opponent">' + logo + '<strong>' + safe(opponentName) + '</strong></span><time>' + safe(localTime(date)) + '</time></div>';
+    }).join('') + '</div>';
+}
+function renderTeamRoster(profile) {
+  if (state.teamProfileLoading && !profile.roster) return '<div class="detail-note">Cargando el plantel completo…</div>';
+  if (profile.rosterError && !profile.roster) return '<div class="detail-note">No se pudo cargar el plantel de este equipo.</div>';
+  const players = collectRosterPlayers(profile.roster);
+  if (!players.length) return '<div class="detail-note">ESPN todavía no publicó jugadores para este equipo.</div>';
+  const groups = groupRoster(players);
+  return '<div class="team-roster-summary"><strong>' + players.length + '</strong> JUGADORES · PLANTEL COMPLETO</div>'
+    + groups.map(group => '<section class="roster-position-group"><h4>' + safe(group.name) + '<span>' + group.players.length + '</span></h4><ul>'
+      + group.players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span><strong>' + safe(player.name) + '</strong><small>' + safe(player.position || 'Posición no informada') + '</small></span></li>').join('')
+      + '</ul></section>').join('');
+}
+function renderTeamProfile() {
+  const profile = state.teamProfile;
+  const team = profile?.team || {};
+  const league = LEAGUES.find(item => item.id === profile?.leagueId) || LEAGUES[0];
+  const teamName = team.displayName || team.name || team.shortDisplayName || 'Equipo';
+  const logo = team.logo || team.logos?.[0]?.href;
+  const initials = team.abbreviation || teamName.split(/\s+/).map(word => word[0]).join('').slice(0, 3);
+  const crest = logo && /^https:\/\//i.test(logo)
+    ? '<img class="team-profile-logo" src="' + safe(logo) + '" alt="" loading="lazy">'
+    : '<span class="team-profile-logo-fallback">' + safe(initials) + '</span>';
+  const playersTab = state.teamProfileTab === 'players';
+  const content = playersTab ? renderTeamRoster(profile) : renderTeamUpcoming(profile);
+  return '<aside class="match-details team-profile-panel" aria-label="Ficha de equipo">'
+    + '<div class="team-profile-actions"><button type="button" class="team-profile-back" data-back-match>← VOLVER AL PARTIDO</button><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar ficha">×</button></div>'
+    + '<div class="team-profile-identity">' + crest + '<div><small>FICHA DEL EQUIPO · ' + safe(league.name) + '</small><h3>' + safe(teamName) + '</h3></div></div>'
+    + '<div class="team-profile-tabs" role="tablist" aria-label="Secciones del equipo">'
+    + '<button type="button" class="team-profile-tab ' + (playersTab ? '' : 'active') + '" data-team-tab="principal" role="tab" aria-selected="' + (!playersTab) + '">PRINCIPAL</button>'
+    + '<button type="button" class="team-profile-tab ' + (playersTab ? 'active' : '') + '" data-team-tab="players" role="tab" aria-selected="' + playersTab + '">JUGADORES</button></div>'
+    + '<div class="team-profile-content">'
+    + (playersTab ? '<div class="team-profile-section-title"><h4>JUGADORES</h4><span>TODAS LAS POSICIONES</span></div>' : '<div class="team-profile-section-title"><h4>PRÓXIMOS PARTIDOS</h4><span>LOCAL / VISITANTE</span></div>')
+    + content + '</div></aside>';
+}
+function teamProfileButton(competitor, side, title) {
+  const teamId = competitor?.team?.id || competitor?.id;
+  if (!teamId) return safe(title);
+  return '<button type="button" class="team-profile-link" data-team-profile="' + side + '" aria-label="Ver ficha de ' + safe(title) + '">' + safe(title) + '</button>';
+}
+function renderLineupSide(title, players, side, competitor) {
+  return '<div class="lineup-side"><h5>' + teamProfileButton(competitor, side, title) + '</h5><ol>' + players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span title="' + safe(player.name) + '">' + safe(player.name) + '<small>' + safe(player.position) + '</small></span></li>').join('') + '</ol></div>';
 }
 function renderMatchDetails(event) {
+  if (state.teamProfile && state.teamProfile.matchId === String(event.id)) return renderTeamProfile();
   const { home, away } = getParticipants(event);
   const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
   const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
@@ -363,18 +512,21 @@ function renderMatchDetails(event) {
     : phase === 'upcoming' ? 'NO CONFIRMADAS'
     : state.matchDetailsError ? 'NO DISPONIBLES' : 'SIN PUBLICAR';
   const lineupContent = lineups.confirmed
-    ? `<div class="lineup-teams">${renderLineupSide(homeName, lineups.home)}${renderLineupSide(awayName, lineups.away)}</div>`
-    : `<div class="detail-note">${loading ? 'Consultando la información del partido…' : phase === 'upcoming' ? 'Las alineaciones todavía no fueron confirmadas.' : state.matchDetailsError ? 'No se pudieron cargar las alineaciones.' : 'La fuente todavía no publicó las alineaciones.'}</div>`;
+    ? '<div class="lineup-teams">' + renderLineupSide(homeName, lineups.home, 'home', home) + renderLineupSide(awayName, lineups.away, 'away', away) + '</div>'
+    : '<div class="detail-note">' + (loading ? 'Consultando la información del partido…' : phase === 'upcoming' ? 'Las alineaciones todavía no fueron confirmadas.' : state.matchDetailsError ? 'No se pudieron cargar las alineaciones.' : 'La fuente todavía no publicó las alineaciones.') + '</div>';
   const substitutionsContent = substitutions.length
-    ? `<ol class="substitution-list">${substitutions.map(item => `<li><b>${safe(item.minute || 'CAMBIO')}</b><span>${safe(item.description)}</span></li>`).join('')}</ol>`
-    : `<div class="detail-note">${loading ? 'Buscando novedades…' : phase === 'upcoming' ? 'Los cambios aparecerán cuando empiece el partido.' : state.matchDetailsError ? 'No se pudieron cargar los cambios.' : phase === 'live' ? 'Todavía no hay cambios registrados.' : 'La fuente no publicó cambios para este partido.'}</div>`;
+    ? '<ol class="substitution-list">' + substitutions.map(item => '<li><b>' + safe(item.minute || 'CAMBIO') + '</b><span>' + safe(item.description) + '</span></li>').join('') + '</ol>'
+    : '<div class="detail-note">' + (loading ? 'Buscando novedades…' : phase === 'upcoming' ? 'Los cambios aparecerán cuando empiece el partido.' : state.matchDetailsError ? 'No se pudieron cargar los cambios.' : phase === 'live' ? 'Todavía no hay cambios registrados.' : 'La fuente no publicó cambios para este partido.') + '</div>';
   const statusLabel = phase === 'live' ? 'EN JUEGO' : phase === 'finished' ? 'FINAL' : 'PRÓXIMO';
-  return `<aside class="match-details" aria-label="Detalle del partido">
-    <div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ${statusLabel}</span><h3>${safe(homeName)} <b>vs</b> ${safe(awayName)}</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>
-    <section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="${lineups.confirmed ? 'confirmed' : ''}">${lineupStatus}</span></div>${lineupContent}</section>
-    <section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>${substitutions.length}</span></div>${substitutionsContent}</section>
-  </aside>`;
+  const homeLink = teamProfileButton(home, 'home', homeName);
+  const awayLink = teamProfileButton(away, 'away', awayName);
+  return '<aside class="match-details" aria-label="Detalle del partido">'
+    + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
+    + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
+    + '<section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>' + substitutions.length + '</span></div>' + substitutionsContent + '</section>'
+    + '</aside>';
 }
+
 function renderMatch(event) {
   const competition = getCompetition(event);
   const { home, away } = getParticipants(event);
@@ -441,6 +593,9 @@ function renderMatches() {
         state.selectedMatchId = null;
         state.matchDetails = null;
         state.matchDetailsLoading = false;
+        state.teamProfile = null;
+        state.teamProfileLoading = false;
+        state.teamProfileRequest += 1;
         state.matchDetailRequest += 1;
         renderMatches();
         return;
@@ -449,6 +604,10 @@ function renderMatches() {
       state.matchDetails = null;
       state.matchDetailsLoading = true;
       state.matchDetailsError = false;
+      state.teamProfile = null;
+      state.teamProfileLoading = false;
+      state.teamProfileRequest += 1;
+      state.matchDetailRequest += 1;
       renderMatches();
       loadMatchDetails(event, true);
     };
@@ -464,7 +623,27 @@ function renderMatches() {
     state.selectedMatchId = null;
     state.matchDetails = null;
     state.matchDetailsLoading = false;
+    state.teamProfile = null;
+    state.teamProfileLoading = false;
+    state.teamProfileRequest += 1;
     state.matchDetailRequest += 1;
+    renderMatches();
+  });
+  list.querySelectorAll('[data-team-profile]').forEach(button => button.addEventListener('click', () => {
+    const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+    if (!event) return;
+    const { home, away } = getParticipants(event);
+    const competitor = button.dataset.teamProfile === 'home' ? home : away;
+    openTeamProfile(event, competitor);
+  }));
+  list.querySelectorAll('[data-team-tab]').forEach(button => button.addEventListener('click', () => {
+    state.teamProfileTab = button.dataset.teamTab;
+    renderMatches();
+  }));
+  list.querySelector('[data-back-match]')?.addEventListener('click', () => {
+    state.teamProfile = null;
+    state.teamProfileLoading = false;
+    state.teamProfileRequest += 1;
     renderMatches();
   });
   list.querySelectorAll('[data-table-league]').forEach(link => link.addEventListener('click', () => {
@@ -472,6 +651,48 @@ function renderMatches() {
     state.activeTable = 0;
     renderStandings();
   }));
+}
+function openTeamProfile(event, competitor) {
+  const team = competitor.team || competitor;
+  const teamId = String(team.id || competitor.id || '');
+  const leagueId = event._leagueId || 'arg.1';
+  const request = ++state.teamProfileRequest;
+  state.teamProfile = {
+    matchId: String(event.id),
+    teamId,
+    team,
+    leagueId,
+    roster: null,
+    schedule: null,
+    rosterError: !teamId,
+    scheduleError: !teamId
+  };
+  state.teamProfileTab = 'principal';
+  state.teamProfileLoading = Boolean(teamId);
+  renderMatches();
+  if (teamId) loadTeamProfile(event, teamId, leagueId, request);
+}
+async function loadTeamProfile(event, teamId, leagueId, request) {
+  const league = LEAGUES.find(item => item.id === leagueId) || LEAGUES[0];
+  const year = dateParts(todayKey()).year;
+  const base = '/' + league.path + '/teams/' + encodeURIComponent(teamId);
+  const rosterPrimary = base + '/roster?season=' + year + '&region=ar&lang=es&limit=500';
+  const rosterFallback = base + '/roster?region=ar&lang=es&limit=500';
+  const schedulePrimary = base + '/schedule?season=' + year + '&region=ar&lang=es';
+  const scheduleFallback = base + '/schedule?region=ar&lang=es';
+  const rosterRequest = fetchFromEspn(rosterPrimary).catch(() => fetchFromEspn(rosterFallback));
+  const scheduleRequest = fetchFromEspn(schedulePrimary).catch(() => fetchFromEspn(scheduleFallback));
+  const [rosterResult, scheduleResult] = await Promise.allSettled([rosterRequest, scheduleRequest]);
+  if (request !== state.teamProfileRequest || state.teamProfile?.matchId !== String(event.id) || state.teamProfile?.teamId !== String(teamId)) return;
+  state.teamProfile = {
+    ...state.teamProfile,
+    roster: rosterResult.status === 'fulfilled' ? rosterResult.value : null,
+    schedule: scheduleResult.status === 'fulfilled' ? scheduleResult.value : null,
+    rosterError: rosterResult.status !== 'fulfilled',
+    scheduleError: scheduleResult.status !== 'fulfilled'
+  };
+  state.teamProfileLoading = false;
+  renderMatches();
 }
 async function loadMatchDetails(event, keepPanel = false) {
   const matchId = String(event.id || '');
@@ -743,6 +964,9 @@ document.querySelectorAll('.filter').forEach(button => button.addEventListener('
   state.selectedMatchId = null;
   state.matchDetails = null;
   state.matchDetailsLoading = false;
+  state.teamProfile = null;
+  state.teamProfileLoading = false;
+  state.teamProfileRequest += 1;
   state.matchDetailRequest += 1;
   renderMatches();
 }));
@@ -751,6 +975,9 @@ function selectDate(date) {
   state.selectedMatchId = null;
   state.matchDetails = null;
   state.matchDetailsLoading = false;
+  state.teamProfile = null;
+  state.teamProfileLoading = false;
+  state.teamProfileRequest += 1;
   state.matchDetailRequest += 1;
   document.querySelector('#datePicker').value = date;
   state.matches = [];
