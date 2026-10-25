@@ -182,8 +182,11 @@ function parseSoccerClock(value) {
 }
 function formatGoalMinute(value) {
   const clock = parseSoccerClock(value);
-  if (!clock) return '';
-  return `${clock.minute}${clock.added === null ? '' : `+${clock.added}`}'`;
+  if (clock) return String(clock.minute) + (clock.added === null ? '' : '+' + clock.added) + "'";
+  const text = String(value ?? '').trim().replace(/[’′]/g, "'");
+  const match = text.match(/(?:^|\s)(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*(?:'|min(?:ute)?s?)(?:$|\s)/i);
+  if (!match) return '';
+  return String(Number(match[1])) + (match[2] === undefined ? '' : '+' + Number(match[2])) + "'";
 }
 function liveClockLabel(event) {
   const status = getCompetition(event).status || event.status || {};
