@@ -46,7 +46,163 @@ const OFFICIAL_SCHEDULES = {
   }
 };
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0 };
+const FOLLOWED_MATCHES_KEY = 'futbol-argentino-followed-v1';
+const PRODE_PREDICTIONS_KEY = 'futbol-argentino-prode-v1';
+function readLocalData(key, fallback) {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) || 'null');
+    return value ?? fallback;
+  } catch { return fallback; }
+}
+function writeLocalData(key, value) {
+  try { localStorage.setItem(key, JSON.stringify(value)); }
+  catch (error) { console.warn('No se pudo guardar en este dispositivo.', error); }
+}
+function readFollowedMatches() {
+  const value = readLocalData(FOLLOWED_MATCHES_KEY, []);
+  return new Set(Array.isArray(value) ? value.map(String) : []);
+}
+const ALERTS_ENABLED_KEY = 'futbol-argentino-alerts-v1';
+function notificationAvailable() { return typeof window !== 'undefined' && 'Notification' in window; }
+function sendBrowserAlert(title, body) {
+  if (!state.alertsEnabled || !notificationAvailable() || Notification.permission !== 'granted') return;
+  try { new Notification(title, { body }); } catch (error) { console.warn('No se pudo mostrar el aviso.', error); }
+}
+function enableMatchAlerts() {
+  if (!notificationAvailable()) { window.alert('Este navegador no permite notificaciones. Los avisos funcionan mientras la página esté abierta.'); return; }
+  Notification.requestPermission().then(permission => {
+    state.alertsEnabled = permission === 'granted';
+    writeLocalData(ALERTS_ENABLED_KEY, state.alertsEnabled);
+    renderMatches();
+    if (state.alertsEnabled) window.alert('Avisos activados para los partidos que sigas.');
+  });
+}
+function eventScore(event) {
+  const { home, away } = getParticipants(event);
+  return [home.score == null ? null : Number(home.score), away.score == null ? null : Number(away.score)];
+}
+function notifyFollowedMatchChanges(previous, current) {
+  const before = new Map(previous.map(event => [String(event.id), event]));
+  current.forEach(event => {
+    const id = String(event.id || '');
+    if (!id || !state.followedMatchIds.has(id)) return;
+    const old = before.get(id);
+    if (!old) return;
+    const [oldHome, oldAway] = eventScore(old);
+    const [home, away] = eventScore(event);
+    const pair = getParticipants(event);
+    const homeName = pair.home.team?.shortDisplayName || pair.home.team?.displayName || 'Local';
+    const awayName = pair.away.team?.shortDisplayName || pair.away.team?.displayName || 'Visitante';
+    if (home != null && away != null && (home > (Number(oldHome) || 0) || away > (Number(oldAway) || 0)))
+      sendBrowserAlert('¡Gol! ' + homeName + ' ' + home + ' – ' + away + ' ' + awayName, 'Actualización del partido que estás siguiendo.');
+    if (matchState(old) !== 'finished' && matchState(event) === 'finished')
+      sendBrowserAlert('Final: ' + homeName + ' ' + (home ?? '–') + ' – ' + (away ?? '–') + ' ' + awayName, 'Terminó el partido que estás siguiendo.');
+  });
+}
+function collectRedCardFingerprints(value, output = new Set()) {
+  if (!value || typeof value !== 'object') return output;
+  if (Array.isArray(value)) { value.forEach(item => collectRedCardFingerprints(item, output)); return output; }
+  const text = Object.entries(value).filter(([,item]) => typeof item === 'string' || typeof item === 'number')
+    .map(([key,item]) => key + ' ' + item).join(' ').toLocaleLowerCase('es');
+  if (/red.?card|tarjeta roja|expuls|sent off/.test(text)) {
+    const identity = value.id || value.guid || value.athlete?.displayName || value.player?.displayName || value.text || value.description || text;
+    output.add(String(identity).slice(0, 180));
+  }
+  Object.values(value).forEach(item => collectRedCardFingerprints(item, output));
+  return output;
+}
+function notifyMatchDetailChanges(matchId, summary, event) {
+  const next = [...collectRedCardFingerprints(summary)];
+  const previous = state.detailSnapshots[matchId];
+  if (previous) {
+    const known = new Set(previous);
+    if (next.some(item => !known.has(item))) {
+      const pair = getParticipants(event);
+      sendBrowserAlert('Tarjeta roja', (pair.home.team?.shortDisplayName || 'Local') + ' vs ' + (pair.away.team?.shortDisplayName || 'Visitante') + ': se registró una expulsión.');
+    }
+  }
+  state.detailSnapshots[matchId] = next;
+}
+function settleProdePredictions(events) {
+  let changed = false;
+  events.forEach(event => {
+    const prediction = state.prodePredictions[String(event.id || '')];
+    if (!prediction || prediction.points != null || matchState(event) !== 'finished') return;
+    const [home, away] = eventScore(event);
+    if (!Number.isFinite(home) || !Number.isFinite(away)) return;
+    const predictedHome = Number(prediction.home), predictedAway = Number(prediction.away);
+    prediction.points = predictedHome === home && predictedAway === away ? 3
+      : Math.sign(predictedHome - predictedAway) === Math.sign(home - away) ? 1 : 0;
+    prediction.actualHome = home; prediction.actualAway = away; changed = true;
+  });
+  if (changed) writeLocalData(PRODE_PREDICTIONS_KEY, state.prodePredictions);
+}
+function prodeMonthForDate(value) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: TIME_ZONE, year: 'numeric', month: '2-digit' })
+    .formatToParts(new Date(value)).map(part => [part.type, part.value]));
+  return parts.year + '-' + parts.month;
+}
+function currentProdeMonth() { return prodeMonthForDate(new Date()); }
+function monthlyProdePoints() {
+  const month = currentProdeMonth();
+  return Object.values(state.prodePredictions).filter(item => item.month === month && item.points != null)
+    .reduce((total, item) => total + Number(item.points || 0), 0);
+}
+function metricValue(statistics, aliases) {
+  const normalize = value => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const names = aliases.map(normalize);
+  const item = statistics.find(stat => names.includes(normalize(stat.name || stat.abbreviation || stat.displayName || stat.label)));
+  return item ? (item.displayValue ?? item.value ?? item.display ?? '—') : '—';
+}
+function matchStats(summary, event) {
+  const { home, away } = getParticipants(event);
+  const source = summary?.boxscore?.teams || summary?.boxscore?.teamStats || [];
+  const teams = Array.isArray(source) ? source : [];
+  const getStats = (competitor, index) => {
+    const id = String(competitor.team?.id || competitor.id || '');
+    const found = teams.find(item => String(item.team?.id || item.id || '') === id) || teams[index];
+    return Array.isArray(found?.statistics) ? found.statistics : [];
+  };
+  const sides = [getStats(home, 0), getStats(away, 1)];
+  return [
+    { label: 'Posesión', values: sides.map(items => metricValue(items, ['possessionPct','possession','possessionPercentage'])) },
+    { label: 'Remates al arco', values: sides.map(items => metricValue(items, ['shotsOnTarget','shotsOnGoal','sot','onTarget'])) },
+    { label: 'Faltas', values: sides.map(items => metricValue(items, ['foulsCommitted','fouls'])) }
+  ];
+}
+function renderAdvancedStats(event) {
+  const rows = matchStats(state.matchDetails, event);
+  const hasData = rows.some(row => row.values.some(value => value !== '—' && value !== ''));
+  const { home, away } = getParticipants(event);
+  return '<section class="detail-section advanced-stats"><div class="detail-section-title"><h4>ESTADÍSTICAS</h4><span>' + (matchState(event) === 'live' ? 'EN VIVO · ACTUALIZA CADA MINUTO' : 'DEL PARTIDO') + '</span></div>'
+    + '<div class="stats-head"><span></span><b>' + safe(home.team?.shortDisplayName || home.team?.displayName || 'Local') + '</b><b>' + safe(away.team?.shortDisplayName || away.team?.displayName || 'Visitante') + '</b></div>'
+    + rows.map(row => '<div class="stats-row"><span>' + row.label + '</span><strong>' + safe(row.values[0]) + '</strong><strong>' + safe(row.values[1]) + '</strong></div>').join('')
+    + (hasData ? '' : '<div class="detail-note">ESPN todavía no publicó estas estadísticas para el partido.</div>') + '</section>';
+}
+function renderFollowControls(event) {
+  const id = String(event.id || '');
+  const followed = state.followedMatchIds.has(id);
+  return '<div class="match-tools"><button type="button" class="follow-match-button ' + (followed ? 'active' : '') + '" data-follow-match="' + safe(id) + '">' + (followed ? '★ SIGUIENDO' : '☆ SEGUIR PARTIDO') + '</button>'
+    + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
+    + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
+}
+function renderProde(event) {
+  const id = String(event.id || ''), prediction = state.prodePredictions[id], phase = matchState(event);
+  const kickoff = Date.parse(event.date || getCompetition(event).date || '');
+  const locked = phase !== 'upcoming' || (Number.isFinite(kickoff) && kickoff <= Date.now());
+  if (locked && !prediction) return '';
+  const { home, away } = getParticipants(event);
+  const homeName = home.team?.shortDisplayName || home.team?.displayName || 'Local';
+  const awayName = away.team?.shortDisplayName || away.team?.displayName || 'Visitante';
+  const result = prediction?.points != null ? ' · ' + prediction.points + ' PTS' : prediction ? ' · GUARDADO' : '';
+  const body = prediction
+    ? '<div class="prode-saved">Tu pronóstico: <b>' + safe(prediction.home) + ' – ' + safe(prediction.away) + '</b>' + safe(result) + '</div>'
+    : '<form class="prode-form" data-prode-form><label><span>' + safe(homeName) + '</span><input name="home" type="number" min="0" max="15" inputmode="numeric" required aria-label="Goles de ' + safe(homeName) + '"></label><b>–</b><label><span>' + safe(awayName) + '</span><input name="away" type="number" min="0" max="15" inputmode="numeric" required aria-label="Goles de ' + safe(awayName) + '"></label><button type="button" data-save-prode="' + safe(id) + '">GUARDAR</button></form>';
+  return '<section class="detail-section prode-section"><div class="detail-section-title"><h4>PRODE GRATIS</h4><span>' + (locked ? 'CERRADO' : 'ANTES DEL PARTIDO') + '</span></div>' + body
+    + '<div class="prode-monthly"><strong>' + monthlyProdePoints() + ' PTS</strong><span>RANKING PERSONAL · ' + safe(currentProdeMonth()) + '</span></div>'
+    + '<p class="alert-limit-note">Guardado en este dispositivo · exacto: 3 pts · ganador o empate: 1 pt.</p></section>';
+}
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), prodePredictions: readLocalData(PRODE_PREDICTIONS_KEY, {}), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {} };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -439,6 +595,28 @@ function shortFixtureDate(value) {
   if (!Number.isFinite(date.getTime())) return 'A CONFIRMAR';
   return new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, day: '2-digit', month: '2-digit' }).format(date);
 }
+function teamScheduleAllEvents(schedule) {
+  const events = schedule?.events || schedule?.schedule?.events || schedule?.team?.events || schedule?.items || [];
+  return Array.isArray(events) ? events : [];
+}
+function teamRecentForm(schedule, profile) {
+  return teamScheduleAllEvents(schedule).filter(event => {
+    if (matchState(event) !== 'finished') return false;
+    const { home, away } = getParticipants(event);
+    return profileTeamMatches(home, profile) || profileTeamMatches(away, profile);
+  }).map(event => {
+    const { home, away } = getParticipants(event), isHome = profileTeamMatches(home, profile);
+    const own = Number(isHome ? home.score : away.score), rival = Number(isHome ? away.score : home.score);
+    if (!Number.isFinite(own) || !Number.isFinite(rival)) return null;
+    return { date: Date.parse(event.date || getCompetition(event).date || ''), result: own > rival ? 'G' : own < rival ? 'P' : 'E' };
+  }).filter(Boolean).sort((a,b) => b.date-a.date).slice(0,5).reverse();
+}
+function renderTeamRecentForm(profile) {
+  const form = teamRecentForm(profile.schedule, profile);
+  return '<section class="team-form-guide"><h4>FORMA RECIENTE</h4><div>' + (form.length
+    ? form.map(item => '<span class="form-result form-' + item.result.toLowerCase() + '" title="' + (item.result === 'G' ? 'Ganó' : item.result === 'E' ? 'Empató' : 'Perdió') + '">' + item.result + '</span>').join('')
+    : '<span class="detail-note">Sin resultados recientes publicados.</span>') + '</div></section>';
+}
 function renderTeamUpcoming(profile) {
   if (state.teamProfileLoading && !profile.schedule) return '<div class="detail-note">Buscando los próximos partidos…</div>';
   if (profile.scheduleError && !profile.schedule) return '<div class="detail-note">No se pudo cargar el calendario de este equipo.</div>';
@@ -497,7 +675,7 @@ function renderTeamProfile() {
     + '<button type="button" class="team-profile-tab ' + (playersTab ? 'active' : '') + '" data-team-tab="players" role="tab" aria-selected="' + playersTab + '">JUGADORES</button></div>'
     + '<div class="team-profile-content">'
     + (playersTab ? '<div class="team-profile-section-title"><h4>JUGADORES</h4><span>TODAS LAS POSICIONES</span></div>' : '<div class="team-profile-section-title"><h4>PRÓXIMOS PARTIDOS</h4><span>LOCAL / VISITANTE</span></div>')
-    + content + '</div></aside>';
+    + (!playersTab ? renderTeamRecentForm(profile) : '') + content + '</div></aside>';
 }
 function teamProfileButton(competitor, side, title) {
   const teamId = competitor?.team?.id || competitor?.id;
@@ -530,6 +708,7 @@ function renderMatchDetails(event) {
   const awayLink = teamProfileButton(away, 'away', awayName);
   return '<aside class="match-details" aria-label="Detalle del partido">'
     + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
+    + renderFollowControls(event) + renderProde(event) + renderAdvancedStats(event)
     + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
     + '<section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>' + substitutions.length + '</span></div>' + substitutionsContent + '</section>'
     + '</aside>';
@@ -548,7 +727,7 @@ function renderMatch(event) {
   const scoreMarkup = phase === 'upcoming' || homeScore == null || awayScore == null
     ? '<span class="dash">–</span>'
     : `<span>${safe(homeScore)}</span><span class="dash">–</span><span>${safe(awayScore)}</span>`;
-  return `<article class="match-row ${phase === 'live' ? 'is-live' : ''} ${String(state.selectedMatchId) === String(event.id) ? 'is-selected' : ''}" data-state="${phase}" data-match-id="${safe(event.id || '')}" role="button" tabindex="0" aria-expanded="${String(state.selectedMatchId) === String(event.id)}" aria-label="Ver alineaciones y cambios de ${safe(home.team?.displayName || home.team?.name || 'equipo local')} contra ${safe(away.team?.displayName || away.team?.name || 'equipo visitante')}">
+  return `<article class="match-row ${state.followedMatchIds.has(String(event.id)) ? 'is-followed' : ''} ${phase === 'live' ? 'is-live' : ''} ${String(state.selectedMatchId) === String(event.id) ? 'is-selected' : ''}" data-state="${phase}" data-match-id="${safe(event.id || '')}" role="button" tabindex="0" aria-expanded="${String(state.selectedMatchId) === String(event.id)}" aria-label="Ver alineaciones y cambios de ${safe(home.team?.displayName || home.team?.name || 'equipo local')} contra ${safe(away.team?.displayName || away.team?.name || 'equipo visitante')}">
     <div class="match-time ${phase}">${timeLabel}</div>
     ${crest(home, 'home')}
     <div class="score">${scoreMarkup}</div>
@@ -637,6 +816,30 @@ function renderMatches() {
     state.matchDetailRequest += 1;
     renderMatches();
   });
+  list.querySelectorAll('[data-follow-match]').forEach(button => button.addEventListener('click', () => {
+    const id = button.dataset.followMatch;
+    if (state.followedMatchIds.has(id)) state.followedMatchIds.delete(id);
+    else state.followedMatchIds.add(id);
+    writeLocalData(FOLLOWED_MATCHES_KEY, [...state.followedMatchIds]);
+    renderMatches();
+  }));
+  list.querySelector('[data-enable-alerts]')?.addEventListener('click', enableMatchAlerts);
+  list.querySelectorAll('[data-save-prode]').forEach(button => button.addEventListener('click', () => {
+    const form = list.querySelector('[data-prode-form]');
+    if (!form?.reportValidity()) return;
+    const home = Number(form.elements.namedItem('home')?.value);
+    const away = Number(form.elements.namedItem('away')?.value);
+    if (!Number.isInteger(home) || !Number.isInteger(away)) return;
+    const id = button.dataset.saveProde;
+    const event = state.matches.find(item => String(item.id) === id);
+    if (!event) return;
+    const kickoff = Date.parse(event.date || getCompetition(event).date || '');
+    if (matchState(event) !== 'upcoming' || (Number.isFinite(kickoff) && kickoff <= Date.now())) return;
+    const month = Number.isFinite(kickoff) ? prodeMonthForDate(kickoff) : currentProdeMonth();
+    state.prodePredictions[id] = { home, away, month, savedAt: new Date().toISOString() };
+    writeLocalData(PRODE_PREDICTIONS_KEY, state.prodePredictions);
+    renderMatches();
+  }));
   list.querySelectorAll('[data-team-profile]').forEach(button => button.addEventListener('click', () => {
     const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
     if (!event) return;
@@ -731,6 +934,7 @@ async function loadMatchDetails(event, keepPanel = false) {
       if (request === state.matchDetailRequest && state.selectedMatchId === matchId) {
         state.matchDetails = summary;
         state.matchDetailsError = false;
+        if (state.followedMatchIds.has(matchId)) notifyMatchDetailChanges(matchId, summary, event);
       }
     } catch (error) {
       if (request === state.matchDetailRequest && state.selectedMatchId === matchId) {
@@ -761,8 +965,13 @@ async function loadScores() {
       }
     }));
     if (feeds.every(feed => feed.error)) throw new Error('No se pudo obtener información de ninguna liga.');
+    const previousMatches = state.matches;
+    const nextMatches = feeds.flatMap(feed => feed.events);
+    if (state.matchSnapshotsInitialized) notifyFollowedMatchChanges(previousMatches, nextMatches);
+    settleProdePredictions(nextMatches);
     state.feeds = feeds;
-    state.matches = feeds.flatMap(feed => feed.events);
+    state.matches = nextMatches;
+    state.matchSnapshotsInitialized = true;
     state.scoresLoaded = true;
     state.season = feeds.find(feed => feed.league.id === 'arg.1')?.data?.leagues?.[0]?.season || state.season;
     document.querySelector('#competitionLabel').textContent = 'ARGENTINA · EUROPA · SUDAMÉRICA · ESPN';
