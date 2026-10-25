@@ -469,6 +469,14 @@ function renderTeamRoster(profile) {
       + group.players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span><strong>' + safe(player.name) + '</strong><small>' + safe(player.position || 'Posición no informada') + '</small></span></li>').join('')
       + '</ul></section>').join('');
 }
+function teamProfileStatus(profile) {
+  const updated = profile.updatedAt
+    ? new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(profile.updatedAt))
+    : '';
+  if (state.teamProfileLoading) return updated ? 'ACTUALIZANDO · ÚLTIMO DATO ' + updated : 'CARGANDO FICHA…';
+  if (profile.refreshError) return updated ? 'ACTUALIZACIÓN PARCIAL · ÚLTIMO DATO ' + updated : 'SIN CONEXIÓN';
+  return updated ? 'ACTUALIZADO ' + updated : 'DATOS NO DISPONIBLES';
+}
 function renderTeamProfile() {
   const profile = state.teamProfile;
   const team = profile?.team || {};
@@ -483,7 +491,7 @@ function renderTeamProfile() {
   const content = playersTab ? renderTeamRoster(profile) : renderTeamUpcoming(profile);
   return '<aside class="match-details team-profile-panel" aria-label="Ficha de equipo">'
     + '<div class="team-profile-actions"><button type="button" class="team-profile-back" data-back-match>← VOLVER AL PARTIDO</button><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar ficha">×</button></div>'
-    + '<div class="team-profile-identity">' + crest + '<div><small>FICHA DEL EQUIPO · ' + safe(league.name) + '</small><h3>' + safe(teamName) + '</h3></div></div>'
+    + '<div class="team-profile-identity">' + crest + '<div><small>FICHA DEL EQUIPO · ' + safe(league.name) + '</small><h3>' + safe(teamName) + '</h3><span class="team-profile-updated">' + safe(teamProfileStatus(profile)) + '</span></div></div>'
     + '<div class="team-profile-tabs" role="tablist" aria-label="Secciones del equipo">'
     + '<button type="button" class="team-profile-tab ' + (playersTab ? '' : 'active') + '" data-team-tab="principal" role="tab" aria-selected="' + (!playersTab) + '">PRINCIPAL</button>'
     + '<button type="button" class="team-profile-tab ' + (playersTab ? 'active' : '') + '" data-team-tab="players" role="tab" aria-selected="' + playersTab + '">JUGADORES</button></div>'
@@ -665,14 +673,16 @@ function openTeamProfile(event, competitor) {
     roster: null,
     schedule: null,
     rosterError: !teamId,
-    scheduleError: !teamId
+    scheduleError: !teamId,
+    updatedAt: null,
+    refreshError: false
   };
   state.teamProfileTab = 'principal';
   state.teamProfileLoading = Boolean(teamId);
   renderMatches();
   if (teamId) loadTeamProfile(event, teamId, leagueId, request);
 }
-async function loadTeamProfile(event, teamId, leagueId, request) {
+async function loadTeamProfile(event, teamId, leagueId, request, preserveScroll = false) {
   const league = LEAGUES.find(item => item.id === leagueId) || LEAGUES[0];
   const year = dateParts(todayKey()).year;
   const base = '/' + league.path + '/teams/' + encodeURIComponent(teamId);
@@ -684,15 +694,26 @@ async function loadTeamProfile(event, teamId, leagueId, request) {
   const scheduleRequest = fetchFromEspn(schedulePrimary).catch(() => fetchFromEspn(scheduleFallback));
   const [rosterResult, scheduleResult] = await Promise.allSettled([rosterRequest, scheduleRequest]);
   if (request !== state.teamProfileRequest || state.teamProfile?.matchId !== String(event.id) || state.teamProfile?.teamId !== String(teamId)) return;
+  const previous = state.teamProfile;
+  const rosterFailed = rosterResult.status !== 'fulfilled';
+  const scheduleFailed = scheduleResult.status !== 'fulfilled';
+  const refreshed = !rosterFailed || !scheduleFailed;
+  const scrollTop = preserveScroll ? document.querySelector('.team-profile-content')?.scrollTop || 0 : 0;
   state.teamProfile = {
-    ...state.teamProfile,
-    roster: rosterResult.status === 'fulfilled' ? rosterResult.value : null,
-    schedule: scheduleResult.status === 'fulfilled' ? scheduleResult.value : null,
-    rosterError: rosterResult.status !== 'fulfilled',
-    scheduleError: scheduleResult.status !== 'fulfilled'
+    ...previous,
+    roster: rosterFailed ? previous.roster : rosterResult.value,
+    schedule: scheduleFailed ? previous.schedule : scheduleResult.value,
+    rosterError: rosterFailed && !previous.roster,
+    scheduleError: scheduleFailed && !previous.schedule,
+    refreshError: rosterFailed || scheduleFailed,
+    updatedAt: refreshed ? Date.now() : previous.updatedAt
   };
   state.teamProfileLoading = false;
   renderMatches();
+  if (preserveScroll) {
+    const content = document.querySelector('.team-profile-content');
+    if (content) content.scrollTop = scrollTop;
+  }
 }
 async function loadMatchDetails(event, keepPanel = false) {
   const matchId = String(event.id || '');
@@ -1007,4 +1028,15 @@ window.setInterval(() => {
   if (event && matchState(event) !== 'finished') loadMatchDetails(event, true);
 }, 60_000);
 window.setInterval(updateVisibleLiveClocks, 15_000);
+window.setInterval(() => {
+  const profile = state.teamProfile;
+  if (!profile?.teamId || state.teamProfileLoading) return;
+  const event = state.matches.find(item => String(item.id) === profile.matchId);
+  if (!event) return;
+  state.teamProfileLoading = true;
+  const status = document.querySelector('.team-profile-updated');
+  if (status) status.textContent = teamProfileStatus(profile);
+  const request = ++state.teamProfileRequest;
+  loadTeamProfile(event, profile.teamId, profile.leagueId, request, true);
+}, 15 * 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
