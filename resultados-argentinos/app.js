@@ -46,7 +46,7 @@ const OFFICIAL_SCHEDULES = {
   }
 };
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0 };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -206,6 +206,129 @@ function renderGoals(event, home, away, scoreTotal) {
   const emptyText = noDetail ? '<span class="goal-empty">Detalle de goles no publicado</span>' : '';
   return `<div class="goals"><span>${homeGoals.join('') || emptyText}</span><span>${awayGoals.join('')}</span></div>`;
 }
+function asBoolean(value) {
+  return value === true || value === 1 || /^(true|yes|starter|starting|titular)$/i.test(String(value || ''));
+}
+function extractMatchLineups(payload, event) {
+  const { home, away } = getParticipants(event);
+  const homeId = String(home.id || home.team?.id || '');
+  const awayId = String(away.id || away.team?.id || '');
+  const teams = new Map([
+    [homeId, { team: home.team || home, players: [] }],
+    [awayId, { team: away.team || away, players: [] }]
+  ].filter(([id]) => id));
+  if (!teams.size) return { home: [], away: [], confirmed: false };
+
+  function addPlayer(record, teamId, assumedStarter) {
+    const player = record.athlete || record.player || record.person || record;
+    const starterValue = record.starter ?? record.isStarter ?? record.isStarting ?? record.starting ?? player.starter ?? player.isStarter ?? player.isStarting;
+    if (!teamId || !teams.has(teamId) || !(assumedStarter || asBoolean(starterValue))) return;
+    const name = player.displayName || player.fullName || player.name || record.displayName || record.fullName || record.name;
+    if (!name) return;
+    const side = teams.get(teamId);
+    const id = String(player.id || record.id || `${name}|${record.jersey || player.jersey || ''}`);
+    if (side.players.some(existing => existing.id === id)) return;
+    const position = record.position?.abbreviation || record.position?.displayName || player.position?.abbreviation || player.position?.displayName || player.position?.name || '';
+    const jersey = record.jersey || record.jerseyNumber || player.jersey || player.jerseyNumber || '';
+    side.players.push({ id, name, position, jersey });
+  }
+
+  const playerKeys = new Set(['athletes', 'players', 'roster', 'entries', 'lineup', 'starters', 'statistics', 'competitors', 'home', 'away']);
+  function walk(value, inheritedTeam = '', assumedStarter = false, key = '', depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 10) return;
+    if (Array.isArray(value)) {
+      value.forEach(item => walk(item, inheritedTeam, assumedStarter, key, depth + 1));
+      return;
+    }
+    const candidateTeam = String(value.team?.id || value.competitor?.id || value.teamId || value.team?.uid || value.id || '');
+    const teamId = teams.has(candidateTeam) ? candidateTeam
+      : key.toLowerCase() === 'home' ? homeId
+      : key.toLowerCase() === 'away' ? awayId
+      : inheritedTeam;
+    const recordLooksLikePlayer = value.athlete || value.player || value.person
+      || ((value.displayName || value.fullName || value.name) && (value.starter !== undefined || value.isStarter !== undefined || value.isStarting !== undefined));
+    if (recordLooksLikePlayer) addPlayer(value, teamId, assumedStarter);
+    for (const [childKey, child] of Object.entries(value)) {
+      const normalizedKey = childKey.toLowerCase();
+      if (playerKeys.has(normalizedKey)) {
+        const childAssumedStarter = assumedStarter || normalizedKey === 'starters' || normalizedKey === 'lineup';
+        walk(child, teamId, childAssumedStarter, childKey, depth + 1);
+      }
+    }
+  }
+
+  const summaryCompetition = getCompetition(payload || {});
+  const sources = [
+    payload?.rosters, payload?.lineups, payload?.lineup,
+    payload?.boxscore?.players, payload?.boxscore?.rosters,
+    summaryCompetition.competitors, getCompetition(event).competitors
+  ];
+  for (const source of sources) walk(source);
+  const homePlayers = teams.get(homeId)?.players || [];
+  const awayPlayers = teams.get(awayId)?.players || [];
+  return { home: homePlayers, away: awayPlayers, confirmed: homePlayers.length >= 11 && awayPlayers.length >= 11 };
+}
+function collectSubstitutions(payload, event) {
+  const items = [];
+  const seen = new Set();
+  const roots = [
+    payload?.plays, payload?.keyEvents, payload?.commentary, payload?.events,
+    getCompetition(payload || {}).details, getCompetition(event).details
+  ];
+  function visit(value, depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 9) return;
+    if (Array.isArray(value)) {
+      value.forEach(item => visit(item, depth + 1));
+      return;
+    }
+    const type = typeof value.type === 'string' ? value.type : [value.type?.name, value.type?.text, value.type?.abbreviation].filter(Boolean).join(' ');
+    const text = value.text || value.shortText || value.description || value.headline || value.detail || '';
+    const matchText = `${type} ${text} ${value.playType || value.eventType || ''}`;
+    if (/substitut|replac|cambio|sustituc|ingresa|sale del campo/i.test(matchText)) {
+      const involved = (value.athletesInvolved || value.athletes || []).map(person => person.displayName || person.fullName || person.name).filter(Boolean);
+      const description = text && !/^substitution$|^cambio$/i.test(text) ? text
+        : involved.length ? `Cambio registrado: ${involved.join(' · ')}`
+        : 'Cambio registrado';
+      const minute = value.clock?.displayValue || value.time?.displayValue || value.minute?.displayValue || value.displayClock
+        || (Number.isFinite(Number(value.minute)) ? `${value.minute}'` : '');
+      const id = String(value.id || `${minute}|${description}`);
+      if (!seen.has(id)) {
+        seen.add(id);
+        items.push({ minute, description });
+      }
+    }
+    for (const child of Object.values(value)) visit(child, depth + 1);
+  }
+  roots.forEach(root => visit(root));
+  return items;
+}
+function renderLineupSide(title, players) {
+  return `<div class="lineup-side"><h5>${safe(title)}</h5><ol>${players.map(player => `<li><b>${safe(player.jersey || '·')}</b><span title="${safe(player.name)}">${safe(player.name)}<small>${safe(player.position)}</small></span></li>`).join('')}</ol></div>`;
+}
+function renderMatchDetails(event) {
+  const { home, away } = getParticipants(event);
+  const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
+  const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
+  const phase = matchState(event);
+  const lineups = extractMatchLineups(state.matchDetails, event);
+  const substitutions = collectSubstitutions(state.matchDetails, event);
+  const loading = state.matchDetailsLoading && !state.matchDetails;
+  const lineupStatus = lineups.confirmed ? 'CONFIRMADAS'
+    : phase === 'upcoming' ? 'NO CONFIRMADAS'
+    : state.matchDetailsError ? 'NO DISPONIBLES' : 'SIN PUBLICAR';
+  const lineupContent = lineups.confirmed
+    ? `<div class="lineup-teams">${renderLineupSide(homeName, lineups.home)}${renderLineupSide(awayName, lineups.away)}</div>`
+    : `<div class="detail-note">${loading ? 'Consultando la información del partido…' : phase === 'upcoming' ? 'Las alineaciones todavía no fueron confirmadas.' : state.matchDetailsError ? 'No se pudieron cargar las alineaciones.' : 'La fuente todavía no publicó las alineaciones.'}</div>`;
+  const substitutionsContent = substitutions.length
+    ? `<ol class="substitution-list">${substitutions.map(item => `<li><b>${safe(item.minute || 'CAMBIO')}</b><span>${safe(item.description)}</span></li>`).join('')}</ol>`
+    : `<div class="detail-note">${loading ? 'Buscando novedades…' : phase === 'upcoming' ? 'Los cambios aparecerán cuando empiece el partido.' : state.matchDetailsError ? 'No se pudieron cargar los cambios.' : phase === 'live' ? 'Todavía no hay cambios registrados.' : 'La fuente no publicó cambios para este partido.'}</div>`;
+  const statusLabel = phase === 'live' ? 'EN JUEGO' : phase === 'finished' ? 'FINAL' : 'PRÓXIMO';
+  return `<aside class="match-details" aria-label="Detalle del partido">
+    <div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ${statusLabel}</span><h3>${safe(homeName)} <b>vs</b> ${safe(awayName)}</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>
+    <section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="${lineups.confirmed ? 'confirmed' : ''}">${lineupStatus}</span></div>${lineupContent}</section>
+    <section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>${substitutions.length}</span></div>${substitutionsContent}</section>
+  </aside>`;
+}
 function renderMatch(event) {
   const competition = getCompetition(event);
   const { home, away } = getParticipants(event);
@@ -220,7 +343,7 @@ function renderMatch(event) {
   const scoreMarkup = phase === 'upcoming' || homeScore == null || awayScore == null
     ? '<span class="dash">–</span>'
     : `<span>${safe(homeScore)}</span><span class="dash">–</span><span>${safe(awayScore)}</span>`;
-  return `<article class="match-row ${phase === 'live' ? 'is-live' : ''}" data-state="${phase}">
+  return `<article class="match-row ${phase === 'live' ? 'is-live' : ''} ${String(state.selectedMatchId) === String(event.id) ? 'is-selected' : ''}" data-state="${phase}" data-match-id="${safe(event.id || '')}" role="button" tabindex="0" aria-expanded="${String(state.selectedMatchId) === String(event.id)}" aria-label="Ver alineaciones y cambios de ${safe(home.team?.displayName || home.team?.name || 'equipo local')} contra ${safe(away.team?.displayName || away.team?.name || 'equipo visitante')}">
     <div class="match-time ${phase}">${timeLabel}</div>
     ${crest(home, 'home')}
     <div class="score">${scoreMarkup}</div>
@@ -246,7 +369,9 @@ function renderMatches() {
           : `<div class="empty-state">${safe(state.filter === 'all' ? `No hay partidos programados para ${feed.league.name} en esta fecha.` : labels[state.filter])}</div>`;
       const tableLink = `<a href="#tablas" data-table-league="${safe(feed.league.id)}">VER TABLA <span>↗</span></a>`;
       const anchor = feed.league.id === 'arg.1' ? ' id="ligas"' : '';
-      return `<section class="competition-group"${anchor}><div class="league-heading"><span class="league-icon">${safe(feed.league.icon || '⚽')}</span><div><strong>${safe(feed.league.name)}</strong><small>${safe(seasonName)}</small></div>${tableLink}</div><div class="competition-matches">${content}</div></section>`;
+      const selectedEvent = feedMatches.find(event => String(event.id) === String(state.selectedMatchId));
+      const detail = selectedEvent ? renderMatchDetails(selectedEvent) : '';
+      return `<section class="competition-group ${selectedEvent ? 'has-details' : ''}"${anchor}><div class="league-heading"><span class="league-icon">${safe(feed.league.icon || '⚽')}</span><div><strong>${safe(feed.league.name)}</strong><small>${safe(seasonName)}</small></div>${tableLink}</div><div class="competition-matches">${content}</div>${detail}</section>`;
     }).join('') || `<div class="empty-state">${safe(labels[state.filter] || labels.all)}</div>`;
   }
   for (const filter of ['all', 'live', 'finished', 'upcoming']) {
@@ -263,11 +388,73 @@ function renderMatches() {
   const liveCount = state.matches.filter(event => matchState(event) === 'live').length;
   if (state.scoresLoaded) setLivePill(liveCount ? `${liveCount} EN JUEGO` : 'DATOS ACTUALIZADOS');
   list.querySelectorAll('.retry-feed').forEach(button => button.addEventListener('click', loadScores));
+  list.querySelectorAll('.match-row[data-match-id]').forEach(row => {
+    const openDetails = () => {
+      const event = state.matches.find(item => String(item.id) === row.dataset.matchId);
+      if (!event) return;
+      if (state.selectedMatchId === String(event.id)) {
+        state.selectedMatchId = null;
+        state.matchDetails = null;
+        state.matchDetailsLoading = false;
+        state.matchDetailRequest += 1;
+        renderMatches();
+        return;
+      }
+      state.selectedMatchId = String(event.id);
+      state.matchDetails = null;
+      state.matchDetailsLoading = true;
+      state.matchDetailsError = false;
+      renderMatches();
+      loadMatchDetails(event, true);
+    };
+    row.addEventListener('click', openDetails);
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openDetails();
+      }
+    });
+  });
+  list.querySelector('[data-close-match-details]')?.addEventListener('click', () => {
+    state.selectedMatchId = null;
+    state.matchDetails = null;
+    state.matchDetailsLoading = false;
+    state.matchDetailRequest += 1;
+    renderMatches();
+  });
   list.querySelectorAll('[data-table-league]').forEach(link => link.addEventListener('click', () => {
     state.activeStandings = link.dataset.tableLeague;
     state.activeTable = 0;
     renderStandings();
   }));
+}
+async function loadMatchDetails(event, keepPanel = false) {
+  const matchId = String(event.id || '');
+  const request = ++state.matchDetailRequest;
+  const officialFixture = matchId.startsWith('official-schedule-');
+  const league = LEAGUES.find(item => item.id === event._leagueId) || LEAGUES[0];
+  if (!officialFixture) {
+    if (!keepPanel) {
+      state.matchDetailsLoading = true;
+      state.matchDetailsError = false;
+      renderMatches();
+    }
+    try {
+      const summary = await fetchFromEspn(`/${league.path}/summary?event=${encodeURIComponent(matchId)}&region=ar&lang=es`);
+      if (request === state.matchDetailRequest && state.selectedMatchId === matchId) {
+        state.matchDetails = summary;
+        state.matchDetailsError = false;
+      }
+    } catch (error) {
+      if (request === state.matchDetailRequest && state.selectedMatchId === matchId) {
+        state.matchDetailsError = true;
+      }
+    }
+  }
+  if (request === state.matchDetailRequest && state.selectedMatchId === matchId) {
+    state.matchDetailsLoading = false;
+    renderMatches();
+  }
 }
 async function loadScores() {
   document.querySelector('#selectedDate').textContent = formatDate(state.date).toLocaleUpperCase('es-AR');
@@ -507,10 +694,18 @@ document.querySelectorAll('.filter').forEach(button => button.addEventListener('
   document.querySelector('.filter.active')?.classList.remove('active');
   button.classList.add('active');
   state.filter = button.dataset.filter;
+  state.selectedMatchId = null;
+  state.matchDetails = null;
+  state.matchDetailsLoading = false;
+  state.matchDetailRequest += 1;
   renderMatches();
 }));
 function selectDate(date) {
   state.date = date;
+  state.selectedMatchId = null;
+  state.matchDetails = null;
+  state.matchDetailsLoading = false;
+  state.matchDetailRequest += 1;
   document.querySelector('#datePicker').value = date;
   state.matches = [];
   state.feeds = [];
@@ -533,4 +728,9 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (state.date !== todayKey()) loadScores();
 }, 15 * 60_000);
+window.setInterval(() => {
+  if (!state.selectedMatchId) return;
+  const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+  if (event && matchState(event) !== 'finished') loadMatchDetails(event, true);
+}, 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
