@@ -172,6 +172,49 @@ function matchState(event) {
   if (type.state === 'in' || /progress|in.play|half.time|live/i.test(`${type.name || ''} ${type.detail || ''}`)) return 'live';
   return 'upcoming';
 }
+function parseSoccerClock(value) {
+  const text = String(value ?? '').trim().replace(/[’′]/g, "'");
+  let match = text.match(/^(\d{1,3})(?:\s*\+\s*(\d{1,2}))?\s*'?$/);
+  if (match) return { minute: Number(match[1]), added: match[2] === undefined ? null : Number(match[2]) };
+  match = text.match(/^(\d{1,3}):(\d{2})$/);
+  if (match) return { minute: Number(match[1]), added: null };
+  return null;
+}
+function formatGoalMinute(value) {
+  const clock = parseSoccerClock(value);
+  if (!clock) return '';
+  return `${clock.minute}${clock.added === null ? '' : `+${clock.added}`}'`;
+}
+function liveClockLabel(event) {
+  const status = getCompetition(event).status || event.status || {};
+  const type = status.type || {};
+  const description = `${type.name || ''} ${type.detail || ''} ${type.shortDetail || ''}`;
+  if (/half.?time|entretiempo|break|paused|suspend|delay|var review/i.test(description)) {
+    return /half.?time|entretiempo/i.test(description) ? 'ENTRETIEMPO' : 'EN PAUSA';
+  }
+  const displayClock = String(status.displayClock || '').trim();
+  const shortDetail = String(type.shortDetail || type.detail || '').trim();
+  const displayParts = parseSoccerClock(displayClock);
+  const shortParts = parseSoccerClock(shortDetail);
+  const source = shortParts?.added !== null && shortParts?.added !== undefined
+    ? shortDetail
+    : displayParts ? displayClock
+    : shortParts ? shortDetail
+    : displayClock || shortDetail;
+  const clock = parseSoccerClock(source);
+  if (!clock) return source || 'EN JUEGO';
+  const elapsed = Math.floor(Math.max(0, Date.now() - (event._clockSyncedAt || Date.now())) / 60_000);
+  return clock.added === null
+    ? `${clock.minute + elapsed}'`
+    : `${clock.minute}+${clock.added + elapsed}'`;
+}
+function updateVisibleLiveClocks() {
+  document.querySelectorAll('.match-row[data-state="live"][data-match-id]').forEach(row => {
+    const event = state.matches.find(item => String(item.id) === row.dataset.matchId);
+    const time = row.querySelector('.match-time');
+    if (event && time) time.innerHTML = `<span class="live-dot"></span>${safe(liveClockLabel(event))}`;
+  });
+}
 function localTime(isoDate) {
   if (!isoDate) return 'HORA A CONFIRMAR';
   return new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(isoDate));
@@ -194,7 +237,7 @@ function goalsFor(event, teamId) {
     return (detail.scoringPlay || /goal/i.test(label)) && String(detail.team?.id || '') === String(teamId || '');
   }).map(detail => {
     const scorer = detail.athletesInvolved?.[0]?.displayName || detail.athletesInvolved?.[0]?.fullName || 'Autor no informado';
-    const minute = detail.clock?.displayValue || detail.displayValue || '';
+    const minute = formatGoalMinute(detail.clock?.displayValue || detail.displayValue || '');
     const extra = detail.ownGoal ? ' (EC)' : detail.penaltyKick ? ' (P)' : '';
     return `<span><b>${safe(minute)}</b>${safe(scorer + extra)}</span>`;
   });
@@ -332,13 +375,12 @@ function renderMatchDetails(event) {
 function renderMatch(event) {
   const competition = getCompetition(event);
   const { home, away } = getParticipants(event);
-  const status = competition.status || event.status || {};
   const phase = matchState(event);
   const homeScore = home.score;
   const awayScore = away.score;
   const scoreTotal = (Number(homeScore) || 0) + (Number(awayScore) || 0);
   const timeLabel = phase === 'live'
-    ? `<span class="live-dot"></span>${safe(status.displayClock || status.type?.shortDetail || 'EN JUEGO')}`
+    ? `<span class="live-dot"></span>${safe(liveClockLabel(event))}`
     : phase === 'finished' ? 'FINAL' : safe(localTime(event.date || competition.date));
   const scoreMarkup = phase === 'upcoming' || homeScore == null || awayScore == null
     ? '<span class="dash">–</span>'
@@ -465,7 +507,8 @@ async function loadScores() {
     const feeds = await Promise.all(LEAGUES.map(async league => {
       try {
         const data = await fetchFromEspn(`/${league.path}/scoreboard?dates=${date}&limit=100&region=ar&lang=es`);
-        const events = Array.isArray(data.events) ? data.events.map(event => ({ ...event, _leagueId: league.id })) : [];
+        const clockSyncedAt = Date.now();
+        const events = Array.isArray(data.events) ? data.events.map(event => ({ ...event, _leagueId: league.id, _clockSyncedAt: clockSyncedAt })) : [];
         return { league, data, events: mergeOfficialSchedule(state.date, league, events), error: false };
       } catch (error) {
         const events = mergeOfficialSchedule(state.date, league, []);
@@ -733,4 +776,5 @@ window.setInterval(() => {
   const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
   if (event && matchState(event) !== 'finished') loadMatchDetails(event, true);
 }, 60_000);
+window.setInterval(updateVisibleLiveClocks, 15_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
