@@ -145,17 +145,6 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .stats-row{padding:6px 0;border-top:1px solid rgba(145,166,175,.1);font-size:8px}
 .stats-row>span{color:var(--muted)}
 .stats-row>strong{text-align:center;color:var(--white)}
-.prode-form{display:grid;grid-template-columns:minmax(0,1fr) 12px minmax(0,1fr) auto;gap:7px;align-items:end}
-.prode-form label{display:grid;gap:4px;min-width:0;color:var(--muted);font-size:8px}
-.prode-form label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.prode-form input{width:100%;min-width:0;height:32px;border:1px solid var(--line);border-radius:6px;background:#091923;color:var(--white);text-align:center}
-.prode-form>b{padding-bottom:8px;color:var(--yellow);text-align:center}
-.prode-form button{height:32px;padding:0 9px;border:0;border-radius:6px;background:var(--yellow);color:#14202a;font-size:8px;font-weight:900;cursor:pointer}
-.prode-saved{padding:9px;border:1px solid rgba(121,215,237,.16);border-radius:7px;color:var(--muted);font-size:9px}
-.prode-saved b{color:var(--white)}
-.prode-monthly{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}
-.prode-monthly strong{color:var(--yellow);font-size:13px}
-.prode-monthly span{color:var(--muted);font-size:7px;font-weight:900;letter-spacing:.7px;text-align:right}
 .team-form-guide{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px;padding:9px;border:1px solid rgba(121,215,237,.14);border-radius:8px;background:rgba(4,15,22,.28)}
 .team-form-guide h4{margin:0;color:var(--muted);font-size:8px;letter-spacing:.8px}
 .team-form-guide>div{display:flex;gap:5px}
@@ -163,4 +152,4 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .form-g{background:rgba(157,224,94,.15);color:var(--green)}
 .form-e{background:rgba(255,211,72,.14);color:var(--yellow)}
 .form-p{background:rgba(255,106,106,.14);color:#ff8585}
-@media(max-width:440px){.match-tools button{font-size:7px;padding:6px}.prode-form{grid-template-columns:1fr 10px 1fr}.prode-form button{grid-column:1/-1;width:100%}}
+@media(max-width:440px){.match-tools button{font-size:7px;padding:6px}}
