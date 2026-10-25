@@ -131,3 +131,4 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .team-profile-link:focus-visible,.lineup-team-link:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
 .lineup-team-link{color:var(--sky);font-size:inherit;font-weight:inherit}
 @media(max-width:700px){.team-profile-panel{padding:12px}.team-profile-identity{padding-bottom:13px}.team-profile-logo,.team-profile-logo-fallback{width:42px;height:42px;flex-basis:42px}.team-profile-identity h3{font-size:15px}.team-fixture-heading,.team-fixture-row{grid-template-columns:40px 25px minmax(0,1fr) 43px;gap:4px;padding-right:6px;padding-left:6px}.team-fixture-heading{font-size:6px}.fixture-opponent strong{font-size:7px}.team-fixture-row time{font-size:7px}}
+.team-profile-updated{display:block;margin-top:4px;color:var(--muted);font-size:7px;font-weight:800;letter-spacing:.45px}
