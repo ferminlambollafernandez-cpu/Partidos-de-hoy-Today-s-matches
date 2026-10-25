@@ -74,3 +74,14 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .substitution-list li b{color:var(--yellow);font-size:8px;letter-spacing:.4px}
 @media(max-width:1050px){.competition-group.has-details{display:flex;flex-direction:column}.competition-group.has-details .competition-matches{border-right:0}.match-details{order:3;border-top:1px solid var(--line);border-left:0}}
 @media(max-width:700px){.match-hint{font-size:9px}.match-details{padding:13px}.detail-heading h3{font-size:13px}.lineup-side li{font-size:8px}}
+/* Banner promocional de GitHub */
+.github-ad{position:relative;display:flex;align-items:center;gap:16px;min-height:68px;margin:0 0 24px;padding:12px 18px;overflow:hidden;border:1px solid rgba(255,190,115,.72);border-radius:9px;background:linear-gradient(105deg,#ff9a35 0%,#f47a20 55%,#e85b16 100%);box-shadow:0 12px 30px rgba(226,91,22,.18);color:#241307;text-decoration:none}
+.github-ad:before{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(115deg,transparent 0 62%,rgba(255,236,202,.15) 62.2%,transparent 62.8%)}
+.github-ad-label{position:relative;flex:0 0 auto;padding:6px 8px;border:1px solid rgba(43,23,8,.25);border-radius:4px;background:rgba(59,28,6,.12);font-size:8px;font-weight:900;letter-spacing:1.2px}
+.github-ad-copy{position:relative;display:flex;min-width:0;flex-direction:column;gap:2px}
+.github-ad-copy strong{font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:900;letter-spacing:.6px}
+.github-ad-copy span{overflow:hidden;font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.github-ad-arrow{position:relative;margin-left:auto;font-size:24px;font-weight:800}
+.github-ad:hover{filter:brightness(1.06);transform:translateY(-1px)}
+.github-ad:focus-visible{outline:3px solid var(--sky);outline-offset:3px}
+@media(max-width:700px){.github-ad{gap:9px;min-height:58px;margin-bottom:18px;padding:10px}.github-ad-label{padding:5px;font-size:7px}.github-ad-copy strong{font-size:14px}.github-ad-copy span{font-size:8px}.github-ad-arrow{font-size:20px}}
