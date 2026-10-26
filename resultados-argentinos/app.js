@@ -462,16 +462,23 @@ function collectSubstitutions(payload, event) {
     const text = value.text || value.shortText || value.description || value.headline || value.detail || '';
     const matchText = `${type} ${text} ${value.playType || value.eventType || ''}`;
     if (/substitut|replac|cambio|sustituc|ingresa|sale del campo/i.test(matchText)) {
-      const involved = (value.athletesInvolved || value.athletes || []).map(person => person.displayName || person.fullName || person.name).filter(Boolean);
+      const involved = (value.athletesInvolved || value.athletes || value.participants || [])
+        .map(person => person.athlete || person)
+        .map(person => person.displayName || person.fullName || person.name).filter(Boolean);
       const description = text && !/^substitution$|^cambio$/i.test(text) ? text
         : involved.length ? `Cambio registrado: ${involved.join(' · ')}`
         : 'Cambio registrado';
+      const spanishChange = text.match(/(?:entra|ingresa)\s+(?:al\s+campo\s+)?(.+?)\s+sustituyendo\s+a\s+(.+?)(?:[.!?,;]|$)/i);
+      const englishChange = text.match(/(?:enters?|comes on)\s+(.+?)\s+(?:for|replacing)\s+(.+?)(?:[.!?,;]|$)/i);
+      const namesMatch = spanishChange || englishChange;
+      const incoming = namesMatch ? namesMatch[1].trim() : '';
+      const outgoing = namesMatch ? namesMatch[2].trim() : '';
       const minute = value.clock?.displayValue || value.time?.displayValue || value.minute?.displayValue || value.displayClock
         || (Number.isFinite(Number(value.minute)) ? `${value.minute}'` : '');
       const id = String(value.id || `${minute}|${description}`);
       if (!seen.has(id)) {
         seen.add(id);
-        items.push({ minute, description });
+        items.push({ minute, description, incoming, outgoing });
       }
     }
     for (const child of Object.values(value)) visit(child, depth + 1);
@@ -707,6 +714,7 @@ function matchPlayerRatings(summary, event) {
     if (!entry) {
       entry = {
         id, name,
+        surname: player.lastName || player.surname || '',
         position: player.position?.abbreviation || player.position?.displayName || player.position?.name || player.position || '',
         jersey: player.jersey || player.jerseyNumber || player.uniform || '',
         stats: {}, starter: false, goalkeeper: false
@@ -715,6 +723,7 @@ function matchPlayerRatings(summary, event) {
       teams.get(teamId).push(entry);
     }
     Object.assign(entry.stats, stats);
+    if (player.lastName || player.surname) entry.surname = player.lastName || player.surname;
     const positionText = [player.position?.name, player.position?.displayName, player.position?.abbreviation || player.position].filter(Boolean).join(' ').toLowerCase();
     if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/.test(positionText)) entry.goalkeeper = true;
     if (player.starter || player.isStarter || player.isStarting) entry.starter = true;
@@ -844,6 +853,11 @@ function matchPlayerRatings(summary, event) {
   for (const players of teams.values()) players.sort((a,b) => Number(b.starter)-Number(a.starter) || Number(b.metrics.minutes || 0)-Number(a.metrics.minutes || 0) || a.name.localeCompare(b.name, 'es'));
   return { home: teams.get(homeId) || [], away: teams.get(awayId) || [], confirmed: starters.confirmed, hasStats: [...entries.values()].some(player => player.hasStats) };
 }
+function ratingSurname(player) {
+  if (player.surname) return String(player.surname).trim();
+  const parts = String(player.name || '').trim().split(/\s+/);
+  return parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
+}
 function renderPlayerRatingSide(name, players) {
   const rated = players.filter(player => player.played);
   if (!rated.length) return '<div class="detail-note">Todavía no hay jugadores publicados.</div>';
@@ -853,7 +867,7 @@ function renderPlayerRatingSide(name, players) {
       const deltaText = delta === 0 ? '6,00 inicial' : (delta > 0 ? '+' : '') + delta.toFixed(2).replace('.', ',');
       const title = player.changes.length ? player.changes.join(' · ') : 'Sin acciones individuales publicadas · nota base 6,00';
       const position = player.position ? '<small>' + safe(player.position) + '</small>' : '';
-      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(player.name) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(2) + '</b></li>';
+      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(ratingSurname(player)) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(2) + '</b></li>';
     }).join('') + '</ol></section>';
 }
 function renderPlayerRatings(event) {
@@ -884,7 +898,9 @@ function renderMatchDetails(event) {
     ? '<div class="lineup-teams">' + renderLineupSide(homeName, lineups.home, 'home', home) + renderLineupSide(awayName, lineups.away, 'away', away) + '</div>'
     : '<div class="detail-note">' + (loading ? 'Consultando la información del partido…' : phase === 'upcoming' ? 'Las alineaciones todavía no fueron confirmadas.' : state.matchDetailsError ? 'No se pudieron cargar las alineaciones.' : 'La fuente todavía no publicó las alineaciones.') + '</div>';
   const substitutionsContent = substitutions.length
-    ? '<ol class="substitution-list">' + substitutions.map(item => '<li><b>' + safe(item.minute || 'CAMBIO') + '</b><span>' + safe(item.description) + '</span></li>').join('') + '</ol>'
+    ? '<ol class="substitution-list">' + substitutions.map(item => '<li><b>' + safe(item.minute || 'CAMBIO') + '</b>' + (item.incoming && item.outgoing
+      ? '<span class="substitution-pair"><span class="substitution-player entering"><i aria-hidden="true">↑</i><strong>' + safe(item.incoming) + '</strong></span><span class="substitution-player leaving"><i aria-hidden="true">↓</i><strong>' + safe(item.outgoing) + '</strong></span></span>'
+      : '<span>' + safe(item.description) + '</span>') + '</li>').join('') + '</ol>'
     : '<div class="detail-note">' + (loading ? 'Buscando novedades…' : phase === 'upcoming' ? 'Los cambios aparecerán cuando empiece el partido.' : state.matchDetailsError ? 'No se pudieron cargar los cambios.' : phase === 'live' ? 'Todavía no hay cambios registrados.' : 'La fuente no publicó cambios para este partido.') + '</div>';
   const statusLabel = phase === 'live' ? 'EN JUEGO' : phase === 'finished' ? 'FINAL' : 'PRÓXIMO';
   const homeLink = teamProfileButton(home, 'home', homeName);
