@@ -177,7 +177,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set() };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set() };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -660,6 +660,191 @@ function teamProfileButton(competitor, side, title) {
 function renderLineupSide(title, players, side, competitor) {
   return '<div class="lineup-side"><h5>' + teamProfileButton(competitor, side, title) + '</h5><ol>' + players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span title="' + safe(player.name) + '">' + safe(player.name) + '<small>' + safe(player.position) + '</small></span></li>').join('') + '</ol></div>';
 }
+function ratingKey(value) {
+  if (value && typeof value === 'object') value = value.name || value.abbreviation || value.displayName || value.label || '';
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+function ratingNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const match = String(value ?? '').match(/-?\d+(?:[.,]\d+)?/);
+  return match ? Number(match[0].replace(',', '.')) : undefined;
+}
+function playerStatsFromRecord(record, inheritedKeys = []) {
+  const stats = {};
+  const keys = record.keys || record.labels || record.statKeys || inheritedKeys;
+  const raw = record.stats ?? record.values;
+  if (Array.isArray(raw)) raw.forEach((value, index) => {
+    const key = ratingKey(keys[index]);
+    if (key) stats[key] = value;
+  });
+  else if (raw && typeof raw === 'object') Object.entries(raw).forEach(([key, value]) => { stats[ratingKey(key)] = value; });
+  const individual = record.statistics;
+  if (Array.isArray(individual)) individual.forEach(item => {
+    if (!item || typeof item !== 'object') return;
+    const key = ratingKey(item.name || item.abbreviation || item.displayName || item.label);
+    if (key) stats[key] = item.displayValue ?? item.value ?? item.display ?? item.stats;
+  });
+  else if (individual && typeof individual === 'object') Object.entries(individual).forEach(([key, value]) => { stats[ratingKey(key)] = value?.displayValue ?? value?.value ?? value; });
+  return stats;
+}
+function matchPlayerRatings(summary, event) {
+  const { home, away } = getParticipants(event);
+  const homeId = String(home.team?.id || home.id || ''), awayId = String(away.team?.id || away.id || '');
+  const teams = new Map([[homeId, []], [awayId, []]].filter(([id]) => id));
+  const entries = new Map();
+  function upsert(player, teamId, stats = {}) {
+    if (!player || !teams.has(teamId)) return;
+    const name = player.displayName || player.fullName || player.name || player.shortName;
+    if (!name) return;
+    const id = String(player.id || player.athleteId || player.uid || name.toLowerCase());
+    const key = teamId + '|' + id;
+    let entry = entries.get(key);
+    if (!entry) {
+      entry = {
+        id, name,
+        position: player.position?.abbreviation || player.position?.displayName || player.position?.name || player.position || '',
+        jersey: player.jersey || player.jerseyNumber || player.uniform || '',
+        stats: {}, starter: false
+      };
+      entries.set(key, entry);
+      teams.get(teamId).push(entry);
+    }
+    Object.assign(entry.stats, stats);
+    if (player.starter || player.isStarter || player.isStarting) entry.starter = true;
+  }
+  const starters = extractMatchLineups(summary, event);
+  starters.home.forEach(player => {
+    const id = homeId + '|' + String(player.id || player.name.toLowerCase());
+    upsert({ ...player, starter: true }, homeId, {});
+    entries.get(id) && (entries.get(id).starter = true);
+  });
+  starters.away.forEach(player => {
+    const id = awayId + '|' + String(player.id || player.name.toLowerCase());
+    upsert({ ...player, starter: true }, awayId, {});
+    entries.get(id) && (entries.get(id).starter = true);
+  });
+  const teamIds = new Set([homeId, awayId].filter(Boolean));
+  const containers = [summary?.boxscore?.players, summary?.boxscore?.playerStats, summary?.players];
+  function walk(value, inheritedTeam = '', inheritedKeys = [], key = '', depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 12) return;
+    if (Array.isArray(value)) {
+      value.forEach(item => walk(item, inheritedTeam, inheritedKeys, key, depth + 1));
+      return;
+    }
+    const candidate = String(value.team?.id || value.competitor?.id || value.teamId || value.team?.uid || '');
+    const teamId = teamIds.has(candidate) ? candidate : key.toLowerCase() === 'home' ? homeId : key.toLowerCase() === 'away' ? awayId : inheritedTeam;
+    const keys = value.keys || value.labels || value.statKeys || inheritedKeys;
+    const athlete = value.athlete || value.player || value.person;
+    if (athlete && teamId) upsert(athlete, teamId, playerStatsFromRecord(value, keys));
+    const childKeys = new Set(['statistics','athletes','players','entries','groups','stats','items','leaders','competitors','home','away','roster']);
+    for (const [childKey, child] of Object.entries(value)) {
+      if (childKeys.has(childKey.toLowerCase()) && !(athlete && childKey.toLowerCase() === 'stats'))
+        walk(child, teamId, keys, childKey, depth + 1);
+    }
+  }
+  containers.forEach(source => walk(source));
+  const phase = matchState(event);
+  const aliases = {
+    minutes: ['minutes','minutesPlayed','playedMinutes','mins'],
+    goals: ['goals','goal'],
+    assists: ['assists','assist','ast'],
+    shotsOnTarget: ['shotsOnTarget','shotsOnGoal','sot'],
+    keyPasses: ['keyPasses','chancesCreated','bigChancesCreated'],
+    dribbles: ['successfulDribbles','dribblesCompleted','takeOnsWon'],
+    tackles: ['successfulTackles','tackles','totalTackles'],
+    interceptions: ['interceptions'],
+    clearances: ['clearances'],
+    recoveries: ['ballRecoveries','recoveries'],
+    duelsWon: ['duelsWon','wonDuels','duelWon'],
+    saves: ['saves','goalkeeperSaves'],
+    penaltiesSaved: ['penaltiesSaved','penaltySaves'],
+    goalsConceded: ['goalsConceded','goalsAgainst'],
+    yellowCards: ['yellowCards','yellowCard','yc'],
+    redCards: ['redCards','redCard','rc'],
+    ownGoals: ['ownGoals','ownGoal'],
+    fouls: ['foulsCommitted','fouls'],
+    dispossessed: ['dispossessed','turnovers','possessionLost'],
+    errors: ['errorsLeadingToGoal','errors','mistakes'],
+    penaltiesMissed: ['penaltiesMissed','penaltyMissed'],
+    penaltiesConceded: ['penaltiesConceded','penaltyConceded'],
+    bigChancesMissed: ['bigChancesMissed','bigChanceMissed']
+  };
+  const statNumber = (stats, names) => {
+    for (const name of names) {
+      const key = ratingKey(name);
+      if (stats[key] !== undefined) return ratingNumber(stats[key]) ?? 0;
+    }
+    return undefined;
+  };
+  const number = (entry, key) => statNumber(entry.stats, aliases[key]);
+  for (const players of teams.values()) players.forEach(player => {
+    player.metrics = Object.fromEntries(Object.keys(aliases).map(key => [key, number(player, key)]).filter(([,value]) => value !== undefined));
+    const pos = String(player.position || '').toLowerCase();
+    player.goalkeeper = /keeper|goal|arquero|portero|\bgk\b|\bpor\b/.test(pos);
+    const played = player.starter || (player.metrics.minutes || 0) > 0
+      || Object.entries(player.metrics).some(([key,value]) => key !== 'minutes' && value > 0);
+    player.played = played;
+    let rating = 6, changes = [];
+    const add = (label, value) => { if (value) { rating += value; changes.push((value > 0 ? '+' : '') + value.toFixed(2) + ' ' + label); } };
+    const cap = (key, max) => Math.min(Math.max(player.metrics[key] || 0, 0), max);
+    add('goles', cap('goals', 4) * 1.20);
+    add('asistencias', cap('assists', 4) * 0.75);
+    add('remates al arco', cap('shotsOnTarget', 6) * 0.10);
+    add('pases clave', cap('keyPasses', 6) * 0.10);
+    add('regates', cap('dribbles', 6) * 0.07);
+    add('entradas', cap('tackles', 7) * 0.07);
+    add('intercepciones', cap('interceptions', 7) * 0.07);
+    add('despejes', cap('clearances', 8) * 0.04);
+    add('recuperaciones', cap('recoveries', 12) * 0.025);
+    add('duelos ganados', cap('duelsWon', 12) * 0.025);
+    add('atajadas', cap('saves', 8) * 0.16);
+    add('penal atajado', cap('penaltiesSaved', 2) * 0.70);
+    add('tarjeta amarilla', cap('yellowCards', 2) * -0.40);
+    add('tarjeta roja', cap('redCards', 2) * -1.80);
+    add('gol en contra', cap('ownGoals', 2) * -1.80);
+    add('faltas', cap('fouls', 8) * -0.025);
+    add('pérdidas', cap('dispossessed', 8) * -0.05);
+    add('error grave', cap('errors', 3) * -0.80);
+    add('penal fallado', cap('penaltiesMissed', 2) * -0.70);
+    add('penal cometido', cap('penaltiesConceded', 2) * -0.45);
+    add('ocasión clara fallada', cap('bigChancesMissed', 4) * -0.20);
+    if (player.goalkeeper) add('goles recibidos', cap('goalsConceded', 6) * -0.20);
+    const pair = getParticipants(event);
+    const teamScore = String(player.id) && teams.get(homeId)?.includes(player) ? Number(pair.home.score) : Number(pair.away.score);
+    if (phase === 'finished' && teamScore === 0 && player.played && (player.metrics.minutes || 0) >= 45) {
+      add('arco en cero', player.goalkeeper ? 0.25 : /def|back|defensor|central|lateral/.test(pos) ? 0.15 : 0);
+    }
+    player.rating = Math.round(Math.max(0, Math.min(10, rating)) * 100) / 100;
+    player.changes = changes;
+    player.hasStats = Object.keys(player.metrics).some(key => player.metrics[key] !== 0);
+  });
+  for (const players of teams.values()) players.sort((a,b) => Number(b.starter)-Number(a.starter) || Number(b.metrics.minutes || 0)-Number(a.metrics.minutes || 0) || a.name.localeCompare(b.name, 'es'));
+  return { home: teams.get(homeId) || [], away: teams.get(awayId) || [], confirmed: starters.confirmed, hasStats: [...entries.values()].some(player => player.hasStats) };
+}
+function renderPlayerRatingSide(name, players) {
+  const rated = players.filter(player => player.played);
+  if (!rated.length) return '<div class="detail-note">Todavía no hay jugadores publicados.</div>';
+  return '<section class="rating-team"><h5>' + safe(name) + '</h5><ol class="player-rating-list">'
+    + rated.map(player => {
+      const delta = player.rating - 6;
+      const deltaText = delta === 0 ? '6,00 inicial' : (delta > 0 ? '+' : '') + delta.toFixed(2).replace('.', ',');
+      const title = player.changes.length ? player.changes.join(' · ') : 'Sin acciones individuales publicadas · nota base 6,00';
+      const position = player.position ? '<small>' + safe(player.position) + '</small>' : '';
+      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(player.name) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(2) + '</b></li>';
+    }).join('') + '</ol></section>';
+}
+function renderPlayerRatings(event) {
+  const ratings = matchPlayerRatings(state.matchDetails, event);
+  const phase = matchState(event);
+  const { home, away } = getParticipants(event);
+  const label = phase === 'finished' ? 'NOTA FINAL' : phase === 'live' ? 'EN VIVO · ESTIMADA' : 'BASE · 6,00';
+  const content = ratings.home.some(player => player.played) || ratings.away.some(player => player.played)
+    ? '<div class="rating-sides">' + renderPlayerRatingSide(home.team?.shortDisplayName || home.team?.displayName || 'Local', ratings.home)
+      + renderPlayerRatingSide(away.team?.shortDisplayName || away.team?.displayName || 'Visitante', ratings.away) + '</div>'
+    : '<div class="detail-note">' + (phase === 'upcoming' ? 'Las notas comienzan en 6,00 cuando se confirmen las alineaciones.' : 'ESPN todavía no publicó los datos individuales de este partido.') + '</div>';
+  return '<section class="detail-section player-ratings"><div class="detail-section-title"><h4>CALIFICACIONES</h4><span class="' + (phase === 'finished' ? 'confirmed' : '') + '">' + label + '</span></div>'
+    + content + '<details class="rating-method"><summary>CRITERIOS Y ESCALA</summary><p>Base 6,00 · límite 0,00–10,00. Suma por goles, asistencias, remates al arco, pases clave, regates, entradas, intercepciones, despejes, recuperaciones, duelos ganados y atajadas. Resta por tarjetas, goles en contra, faltas, pérdidas, errores y penales fallados o cometidos. Se actualiza con las estadísticas que ESPN publique.</p></details></section>';
+}
 function renderMatchDetails(event) {
   if (state.teamProfile && state.teamProfile.matchId === String(event.id)) return renderTeamProfile();
   const { home, away } = getParticipants(event);
@@ -684,6 +869,7 @@ function renderMatchDetails(event) {
   return '<aside class="match-details" aria-label="Detalle del partido">'
     + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
     + renderFollowControls(event) + renderAdvancedStats(event)
+    + renderPlayerRatings(event)
     + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
     + '<section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>' + substitutions.length + '</span></div>' + substitutionsContent + '</section>'
     + '</aside>';
@@ -1193,7 +1379,12 @@ window.setInterval(() => {
 window.setInterval(() => {
   if (!state.selectedMatchId) return;
   const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
-  if (event && matchState(event) !== 'finished') loadMatchDetails(event, true);
+  if (!event) return;
+  const id = String(event.id), finished = matchState(event) === 'finished';
+  if (!finished || !state.finalDetailsLoadedFor.has(id)) {
+    if (finished) state.finalDetailsLoadedFor.add(id);
+    loadMatchDetails(event, true);
+  }
 }, 60_000);
 window.setInterval(updateVisibleLiveClocks, 15_000);
 window.setInterval(() => {
