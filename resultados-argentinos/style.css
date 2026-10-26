@@ -172,3 +172,10 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .rating-method summary{cursor:pointer;color:var(--sky);font-size:7px;font-weight:900;letter-spacing:.7px}
 .rating-method p{margin:7px 0 0}
 @media(max-width:470px){.rating-sides{grid-template-columns:1fr;gap:12px}}
+
+.substitution-pair{display:grid;gap:5px}
+.substitution-player{display:flex;align-items:center;gap:6px;min-width:0}
+.substitution-player i{width:12px;flex:0 0 12px;font-size:14px;font-style:normal;font-weight:900;line-height:1}
+.substitution-player strong{overflow:hidden;color:var(--white);font-size:8px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.substitution-player.entering i{color:var(--green)}
+.substitution-player.leaving i{color:#ff8585}
