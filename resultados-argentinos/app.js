@@ -674,6 +674,11 @@ function playerStatsFromRecord(record, inheritedKeys = []) {
   const keys = record.keys || record.labels || record.statKeys || inheritedKeys;
   const raw = record.stats ?? record.values;
   if (Array.isArray(raw)) raw.forEach((value, index) => {
+    if (value && typeof value === 'object') {
+      const key = ratingKey(value.name || value.abbreviation || value.displayName || value.label || keys[index]);
+      if (key) stats[key] = value.value ?? value.displayValue ?? value.display ?? value.stats;
+      return;
+    }
     const key = ratingKey(keys[index]);
     if (key) stats[key] = value;
   });
@@ -704,12 +709,14 @@ function matchPlayerRatings(summary, event) {
         id, name,
         position: player.position?.abbreviation || player.position?.displayName || player.position?.name || player.position || '',
         jersey: player.jersey || player.jerseyNumber || player.uniform || '',
-        stats: {}, starter: false
+        stats: {}, starter: false, goalkeeper: false
       };
       entries.set(key, entry);
       teams.get(teamId).push(entry);
     }
     Object.assign(entry.stats, stats);
+    const positionText = [player.position?.name, player.position?.displayName, player.position?.abbreviation || player.position].filter(Boolean).join(' ').toLowerCase();
+    if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/.test(positionText)) entry.goalkeeper = true;
     if (player.starter || player.isStarter || player.isStarting) entry.starter = true;
   }
   const starters = extractMatchLineups(summary, event);
@@ -724,7 +731,7 @@ function matchPlayerRatings(summary, event) {
     entries.get(id) && (entries.get(id).starter = true);
   });
   const teamIds = new Set([homeId, awayId].filter(Boolean));
-  const containers = [summary?.boxscore?.players, summary?.boxscore?.playerStats, summary?.players];
+  const containers = [summary?.boxscore?.players, summary?.boxscore?.playerStats, summary?.players, summary?.rosters, summary?.leaders];
   function walk(value, inheritedTeam = '', inheritedKeys = [], key = '', depth = 0) {
     if (!value || typeof value !== 'object' || depth > 12) return;
     if (Array.isArray(value)) {
@@ -735,7 +742,7 @@ function matchPlayerRatings(summary, event) {
     const teamId = teamIds.has(candidate) ? candidate : key.toLowerCase() === 'home' ? homeId : key.toLowerCase() === 'away' ? awayId : inheritedTeam;
     const keys = value.keys || value.labels || value.statKeys || inheritedKeys;
     const athlete = value.athlete || value.player || value.person;
-    if (athlete && teamId) upsert(athlete, teamId, playerStatsFromRecord(value, keys));
+    if (athlete && teamId) upsert({ ...athlete, position: value.position || athlete.position, jersey: value.jersey || athlete.jersey, starter: value.starter ?? athlete.starter }, teamId, playerStatsFromRecord(value, keys));
     const childKeys = new Set(['statistics','athletes','players','entries','groups','stats','items','leaders','competitors','home','away','roster']);
     for (const [childKey, child] of Object.entries(value)) {
       if (childKeys.has(childKey.toLowerCase()) && !(athlete && childKey.toLowerCase() === 'stats'))
@@ -746,19 +753,28 @@ function matchPlayerRatings(summary, event) {
   const phase = matchState(event);
   const aliases = {
     minutes: ['minutes','minutesPlayed','playedMinutes','mins'],
-    goals: ['goals','goal'],
-    assists: ['assists','assist','ast'],
+    appearances: ['appearances'],
+    subIns: ['subIns','substitutionsEntered'],
+    goals: ['totalGoals','goals','goal'],
+    assists: ['goalAssists','assists','assist','ast'],
     shotsOnTarget: ['shotsOnTarget','shotsOnGoal','sot'],
-    keyPasses: ['keyPasses','chancesCreated','bigChancesCreated'],
+    totalShots: ['totalShots','shots','totalAttempts'],
+    expectedGoals: ['expectedGoals','xG'],
+    expectedAssists: ['expectedAssists','xA'],
+    accuratePasses: ['accuratePasses','passesCompleted'],
+    keyPasses: ['shotAssists','keyPasses','chancesCreated','bigChanceCreated','bigChancesCreated'],
     dribbles: ['successfulDribbles','dribblesCompleted','takeOnsWon'],
-    tackles: ['successfulTackles','tackles','totalTackles'],
-    interceptions: ['interceptions'],
-    clearances: ['clearances'],
+    tackles: ['effectiveTackles','successfulTackles','tackles','totalTackles'],
+    interceptions: ['interceptions','defensiveInterventions'],
+    defensiveInterventions: ['defensiveInterventions'],
+    clearances: ['effectiveClearance','totalClearance','clearances'],
     recoveries: ['ballRecoveries','recoveries'],
-    duelsWon: ['duelsWon','wonDuels','duelWon'],
+    duelsWon: ['duelsWon','wonDuels','duelWon','effectiveDuels'],
+    offsides: ['offsides'],
     saves: ['saves','goalkeeperSaves'],
     penaltiesSaved: ['penaltiesSaved','penaltySaves'],
     goalsConceded: ['goalsConceded','goalsAgainst'],
+    shotsFaced: ['shotsFaced','goalkeeperShotsFaced'],
     yellowCards: ['yellowCards','yellowCard','yc'],
     redCards: ['redCards','redCard','rc'],
     ownGoals: ['ownGoals','ownGoal'],
@@ -780,9 +796,10 @@ function matchPlayerRatings(summary, event) {
   for (const players of teams.values()) players.forEach(player => {
     player.metrics = Object.fromEntries(Object.keys(aliases).map(key => [key, number(player, key)]).filter(([,value]) => value !== undefined));
     const pos = String(player.position || '').toLowerCase();
-    player.goalkeeper = /keeper|goal|arquero|portero|\bgk\b|\bpor\b/.test(pos);
-    const played = player.starter || (player.metrics.minutes || 0) > 0
-      || Object.entries(player.metrics).some(([key,value]) => key !== 'minutes' && value > 0);
+    player.goalkeeper = player.goalkeeper || /keeper|goal|arquero|portero|\bgk\b|\bpor\b/.test(pos) || player.metrics.saves !== undefined;
+    const played = player.starter || (player.metrics.appearances || 0) > 0 || (player.metrics.subIns || 0) > 0
+      || (player.metrics.minutes || 0) > 0
+      || Object.entries(player.metrics).some(([key,value]) => !['minutes','appearances','subIns'].includes(key) && value > 0);
     player.played = played;
     let rating = 6, changes = [];
     const add = (label, value) => { if (value) { rating += value; changes.push((value > 0 ? '+' : '') + value.toFixed(2) + ' ' + label); } };
@@ -790,7 +807,13 @@ function matchPlayerRatings(summary, event) {
     add('goles', cap('goals', 4) * 1.20);
     add('asistencias', cap('assists', 4) * 0.75);
     add('remates al arco', cap('shotsOnTarget', 6) * 0.10);
+    add('remates', cap('totalShots', 8) * 0.04);
+    add('goles esperados', Math.min(Math.max(player.metrics.expectedGoals || 0, 0), 2) * 0.20);
+    add('asistencias esperadas', Math.min(Math.max(player.metrics.expectedAssists || 0, 0), 1.5) * 0.20);
+    add('pases precisos', cap('accuratePasses', 80) * 0.005);
     add('pases clave', cap('keyPasses', 6) * 0.10);
+    add('intervenciones defensivas', cap('defensiveInterventions', 8) * 0.05);
+    add('fuera de juego', cap('offsides', 3) * -0.05);
     add('regates', cap('dribbles', 6) * 0.07);
     add('entradas', cap('tackles', 7) * 0.07);
     add('intercepciones', cap('interceptions', 7) * 0.07);
@@ -811,7 +834,7 @@ function matchPlayerRatings(summary, event) {
     if (player.goalkeeper) add('goles recibidos', cap('goalsConceded', 6) * -0.20);
     const pair = getParticipants(event);
     const teamScore = String(player.id) && teams.get(homeId)?.includes(player) ? Number(pair.home.score) : Number(pair.away.score);
-    if (phase === 'finished' && teamScore === 0 && player.played && (player.metrics.minutes || 0) >= 45) {
+    if (phase === 'finished' && teamScore === 0 && player.played && ((player.metrics.minutes || 0) >= 45 || (player.metrics.appearances || 0) > 0)) {
       add('arco en cero', player.goalkeeper ? 0.25 : /def|back|defensor|central|lateral/.test(pos) ? 0.15 : 0);
     }
     player.rating = Math.round(Math.max(0, Math.min(10, rating)) * 100) / 100;
