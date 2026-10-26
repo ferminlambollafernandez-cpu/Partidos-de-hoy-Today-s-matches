@@ -867,7 +867,7 @@ function renderPlayerRatingSide(name, players) {
       const deltaText = delta === 0 ? '6,00 inicial' : (delta > 0 ? '+' : '') + delta.toFixed(2).replace('.', ',');
       const title = player.changes.length ? player.changes.join(' · ') : 'Sin acciones individuales publicadas · nota base 6,00';
       const position = player.position ? '<small>' + safe(player.position) + '</small>' : '';
-      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(ratingSurname(player)) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(2) + '</b></li>';
+      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(ratingSurname(player)) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(1) + '</b></li>';
     }).join('') + '</ol></section>';
 }
 function renderPlayerRatings(event) {
