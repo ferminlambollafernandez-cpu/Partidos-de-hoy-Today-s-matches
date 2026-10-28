@@ -727,6 +727,38 @@ function playerProfileStatValue(stats, metric) {
 function playerProfileHasStats(stats) {
   return ['appearances','minutes','goals','assists','rating'].some(key => playerProfileStatValue(stats, key) !== undefined);
 }
+function playerProfileStatMap(source, inheritedKeys = []) {
+  const output = {};
+  const add = (label, value) => {
+    const key = ratingKey(label);
+    if (key && value !== undefined && value !== null && value !== '') output[key] = value;
+  };
+  const addStat = (item, index = 0, keys = inheritedKeys) => {
+    if (item == null) { add(keys[index], item); return; }
+    if (typeof item !== 'object') { add(keys[index], item); return; }
+    const value = item.value ?? item.displayValue ?? item.display ?? item.stats;
+    const labels = [item.name, item.abbreviation, item.displayName, item.label, keys[index]].filter(Boolean);
+    labels.forEach(label => add(label, value));
+  };
+  if (!source || typeof source !== 'object') return output;
+  const categories = source.splits?.categories || source.categories || source.statistics?.categories || source.stats?.categories || [];
+  if (Array.isArray(categories)) categories.forEach(category => {
+    const entries = category?.stats || category?.statistics || category?.values;
+    if (Array.isArray(entries)) entries.forEach((item, index) => addStat(item, index, category.keys || category.labels || []));
+    else if (entries && typeof entries === 'object') Object.entries(entries).forEach(([key, value]) => add(key, value?.value ?? value?.displayValue ?? value));
+  });
+  for (const collection of [source.statistics, source.stats, source.values]) {
+    if (Array.isArray(collection)) collection.forEach((item, index) => addStat(item, index));
+    else if (collection && typeof collection === 'object') Object.entries(collection).forEach(([key, value]) => {
+      if (key === 'categories') return;
+      add(key, value?.value ?? value?.displayValue ?? value);
+    });
+  }
+  if (!Object.keys(output).length) Object.entries(source).forEach(([key, value]) => {
+    if (value == null || typeof value !== 'object') add(key, value);
+  });
+  return output;
+}
 function profileSeasonName(value) {
   if (value && typeof value === 'object') {
     return profileSeasonName(value.year || value.displayName || value.name || value.abbreviation || value.id || value.startDate);
@@ -841,6 +873,8 @@ function averagePlayerSeasonRating(stats, appearances, position) {
   const supplied = playerProfileStatValue(stats, 'rating');
   if (supplied !== undefined && supplied >= 0 && supplied <= 10) return { value: supplied, estimated: false };
   if (!appearances || appearances <= 0) return { value: null, estimated: false };
+  const meaningful = ['goals','assists','shots','shotsOnTarget','expectedGoals','expectedAssists','keyPasses','defensiveInterventions','offsides','dribbles','tackles','interceptions','clearances','recoveries','duelsWon','saves','penaltiesSaved','goalsConceded','yellowCards','redCards','ownGoals','fouls','dispossessed','errors','penaltiesMissed','penaltiesConceded','bigChancesMissed'];
+  if (!meaningful.some(key => (playerProfileStatValue(stats, key) || 0) !== 0)) return { value: null, estimated: false };
   const perGame = {};
   Object.keys(PLAYER_PROFILE_STAT_ALIASES).forEach(key => {
     const total = playerProfileStatValue(stats, key);
@@ -852,6 +886,10 @@ function collectPlayerCareerRows(profile) {
   const fallbackTeam = profile.teamName || '';
   const fallbackPosition = profile.player?.position || '';
   const seasonRows = [
+    ...(profile.seasonData || []).map(item => ({
+      season: String(item.season || ''), team: item.team || 'Equipo no informado', teamLogo: item.teamLogo || '',
+      stats: playerProfileStatMap(item.stats || {})
+    })),
     ...collectPlayerSeasonStats(profile.stats, fallbackTeam),
     ...collectPlayerSeasonStats(profile.bio, fallbackTeam)
   ];
@@ -862,6 +900,7 @@ function collectPlayerCareerRows(profile) {
     Object.entries(row.stats).forEach(([name, value]) => {
       if (existing.stats[name] === undefined) existing.stats[name] = value;
     });
+    existing.teamLogo = existing.teamLogo || row.teamLogo || '';
     merged.set(key, existing);
   });
   const gameRows = collectPlayerGameLog(profile.gamelog, fallbackTeam, fallbackPosition);
@@ -964,44 +1003,144 @@ function openPlayerProfile(event, button) {
   renderMatches();
   if (state.playerProfileLoading) loadPlayerProfile(event, playerId, request);
 }
+
+function normalizeEspnReference(reference) {
+  const raw = typeof reference === 'string' ? reference : reference?.$ref;
+  if (!raw) return '';
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:') url.protocol = 'https:';
+    if (url.hostname === 'sports.core.api.espn.pvt') url.hostname = 'sports.core.api.espn.com';
+    return url.href;
+  } catch {
+    return String(raw).replace(/^http:/i, 'https:').replace('sports.core.api.espn.pvt', 'sports.core.api.espn.com');
+  }
+}
+async function fetchEspnReference(reference) {
+  const url = normalizeEspnReference(reference);
+  return url ? fetchJson(url) : null;
+}
+async function loadPlayerSeasonHistory(athlete, playerId, league, currentStats) {
+  const seasonsUrl = normalizeEspnReference(athlete?.seasons);
+  if (!seasonsUrl) return [];
+  let seasonList;
+  try { seasonList = await fetchJson(seasonsUrl); } catch { return []; }
+  const items = seasonList?.items || seasonList?.seasons?.items || [];
+  const years = [...new Set(items.map(item => profileSeasonName(item?.$ref || item?.year || item?.name || item))
+    .filter(year => /^\d{4}$/.test(year)))].sort((a, b) => Number(b) - Number(a));
+  const latestYear = profileSeasonName(athlete?.statistics?.$ref || athlete?.$ref);
+  if (latestYear && !years.includes(latestYear)) years.unshift(latestYear);
+  if (!years.length) return [];
+  const coreBase = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/' + encodeURIComponent(league.id);
+  const seasons = await Promise.all(years.map(async year => {
+    const isCurrent = year === latestYear || (!latestYear && year === String(dateParts(todayKey()).year));
+    const seasonProfile = isCurrent ? athlete : await fetchJson(coreBase + '/seasons/' + encodeURIComponent(year) + '/athletes/' + encodeURIComponent(playerId) + '?lang=es&region=ar').catch(() => null);
+    if (!seasonProfile) return null;
+    const statisticsReference = seasonProfile.statistics || (isCurrent ? athlete.statistics : null);
+    const teamReference = seasonProfile.team || (isCurrent ? athlete.team : null);
+    const teamPromise = fetchEspnReference(teamReference).catch(() => null);
+    const statsPromise = isCurrent && currentStats
+      ? Promise.resolve(currentStats)
+      : fetchEspnReference(statisticsReference).catch(() => null);
+    let [team, stats] = await Promise.all([teamPromise, statsPromise]);
+    let eventLog = null;
+    if (!stats && seasonProfile.eventLog) {
+      eventLog = await fetchEspnReference(seasonProfile.eventLog).catch(() => null);
+    }
+    const grouped = new Map();
+    if (!stats && eventLog) {
+      const log = eventLog.events || eventLog;
+      const pageCount = Math.min(Number(log.pageCount) || 1, 8);
+      const allItems = [...(log.items || [])];
+      if (pageCount > 1) {
+        const pages = await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => {
+          const pageUrl = new URL(normalizeEspnReference(seasonProfile.eventLog));
+          pageUrl.searchParams.set('page', String(index + 2));
+          return fetchJson(pageUrl.href).catch(() => null);
+        }));
+        pages.forEach(page => allItems.push(...(page?.events?.items || page?.items || [])));
+      }
+      const seen = new Set();
+      for (const item of allItems) {
+        if (!item?.played) continue;
+        const id = item.statistics?.$ref || item.event?.$ref || String(item.teamId || '');
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const teamId = String(item.teamId || '');
+        if (!grouped.has(teamId)) grouped.set(teamId, { appearances: 0, team: null });
+        grouped.get(teamId).appearances += 1;
+      }
+      const teamRefs = eventLog.teams || {};
+      await Promise.all([...grouped.entries()].map(async ([teamId, row]) => {
+        const reference = teamRefs[teamId]?.team || teamRefs[teamId] || null;
+        if (reference) row.team = await fetchEspnReference(reference).catch(() => null);
+      }));
+    }
+    const rows = [];
+    const seasonTeam = profileTeamName(team) || (isCurrent ? profileTeamName(athlete.team) : '') || '';
+    if (stats || team) {
+      rows.push({
+        season: year,
+        team: seasonTeam,
+        teamLogo: team?.logo || team?.logos?.[0]?.href || '',
+        stats: stats || null
+      });
+    }
+    for (const [, row] of grouped) {
+      const rowTeam = profileTeamName(row.team) || '';
+      const existing = rows.find(item => item.team && rowTeam && item.team.toLowerCase() === rowTeam.toLowerCase());
+      if (existing) {
+        if (!existing.stats) existing.stats = { appearances: row.appearances };
+        continue;
+      }
+      rows.push({
+        season: year,
+        team: rowTeam || seasonTeam,
+        teamLogo: row.team?.logo || row.team?.logos?.[0]?.href || '',
+        stats: { appearances: row.appearances }
+      });
+    }
+    return rows;
+  }));
+  return seasons.flat().filter(Boolean);
+}
+
 async function loadPlayerProfile(event, playerId, request) {
   const leagueId = state.playerProfile?.leagueId || event._leagueId || 'arg.1';
   const league = LEAGUES.find(item => item.id === leagueId) || LEAGUES[0];
   const encodedId = encodeURIComponent(playerId);
   const sitePath = '/' + league.path + '/athletes/' + encodedId + '?region=ar&lang=es';
   const coreBase = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/' + encodeURIComponent(league.id);
-  const commonBase = 'https://site.web.api.espn.com/apis/common/v3/sports/' + league.path + '/athletes/' + encodedId;
-  const bioRequest = fetchFromEspn(sitePath).catch(() => fetchJson(coreBase + '/athletes/' + encodedId + '?region=ar&lang=es'));
-  const statsRequest = fetchJson(commonBase + '/stats?region=ar&lang=es').catch(() =>
-    fetchJson(coreBase + '/athletes/' + encodedId + '/statistics?region=ar&lang=es').catch(() => null));
-  const logRequest = fetchJson(commonBase + '/gamelog?region=ar&lang=es').catch(() => null);
-  const [bioResult, statsResult, logResult] = await Promise.allSettled([bioRequest, statsRequest, logRequest]);
+  const bioRequest = fetchJson(coreBase + '/athletes/' + encodedId + '?region=ar&lang=es')
+    .catch(() => fetchFromEspn(sitePath));
+  const bioResult = await Promise.allSettled([bioRequest]);
   if (request !== state.playerProfileRequest || state.playerProfile?.playerId !== String(playerId)
       || state.playerProfile?.matchId !== String(event.id)) return;
   const previous = state.playerProfile;
-  const bioFailed = bioResult.status !== 'fulfilled';
-  const statsFailed = statsResult.status !== 'fulfilled' || !statsResult.value;
-  const logFailed = logResult.status !== 'fulfilled' || !logResult.value;
-  let bio = bioFailed ? null : bioResult.value;
+  const bioFailed = bioResult[0].status !== 'fulfilled';
+  const bio = bioFailed ? null : bioResult[0].value;
   const athlete = unwrapPlayerProfile(bio);
-  let stats = statsFailed ? null : statsResult.value;
-  if ((!stats || !playerProfileHasStats(playerProfileStatMap(stats))) && athlete.statistics?.$ref) {
-    try { stats = await fetchJson(athlete.statistics.$ref); } catch {}
-  }
-  if (!stats || !playerProfileHasStats(playerProfileStatMap(stats))) {
-    try {
-      const coreStats = await fetchJson(coreBase + '/athletes/' + encodedId + '/statistics?region=ar&lang=es');
-      if (playerProfileHasStats(playerProfileStatMap(coreStats))) stats = coreStats;
-    } catch {}
-  }
+  const statisticsReference = normalizeEspnReference(athlete.statistics);
+  let stats = statisticsReference ? await fetchJson(statisticsReference).catch(() => null) : null;
   if (request !== state.playerProfileRequest || state.playerProfile?.playerId !== String(playerId)
       || state.playerProfile?.matchId !== String(event.id)) return;
   state.playerProfile = {
     ...previous,
     bio: bio || { ...previous.player },
     stats,
-    gamelog: logFailed ? null : logResult.value,
-    refreshError: bioFailed || (statsFailed && logFailed),
+    seasonData: [],
+    gamelog: null,
+    refreshError: bioFailed || !stats,
+    updatedAt: Date.now()
+  };
+  renderMatches();
+  const seasonData = await loadPlayerSeasonHistory(athlete, playerId, league, stats);
+  if (request !== state.playerProfileRequest || state.playerProfile?.playerId !== String(playerId)
+      || state.playerProfile?.matchId !== String(event.id)) return;
+  state.playerProfile = {
+    ...state.playerProfile,
+    seasonData,
+    refreshError: bioFailed || (!stats && !seasonData.length),
     updatedAt: Date.now()
   };
   state.playerProfileLoading = false;
