@@ -177,7 +177,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set() };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set() };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -407,7 +407,14 @@ function extractMatchLineups(payload, event) {
     if (side.players.some(existing => existing.id === id)) return;
     const position = record.position?.abbreviation || record.position?.displayName || player.position?.abbreviation || player.position?.displayName || player.position?.name || '';
     const jersey = record.jersey || record.jerseyNumber || player.jersey || player.jerseyNumber || '';
-    side.players.push({ id, name, position, jersey });
+    side.players.push({
+      id, name, position, jersey,
+      headshot: player.headshot || player.photo || '',
+      displayHeight: player.displayHeight || player.height || '',
+      age: player.age || '',
+      dateOfBirth: player.dateOfBirth || player.birthDate || '',
+      citizenship: player.citizenship || player.nationality || ''
+    });
   }
 
   const playerKeys = new Set(['athletes', 'players', 'roster', 'entries', 'lineup', 'starters', 'statistics', 'competitors', 'home', 'away']);
@@ -519,7 +526,12 @@ function collectRosterPlayers(payload) {
           name,
           jersey: value.jersey || value.jerseyNumber || person.jersey || person.jerseyNumber || '',
           position: playerPosition,
-          positionCode
+          positionCode,
+          headshot: person.headshot || value.headshot || '',
+          height: person.displayHeight || person.height || '',
+          age: person.age || '',
+          dateOfBirth: person.dateOfBirth || person.birthDate || '',
+          citizenship: person.citizenship || person.nationality || ''
         });
       }
     }
@@ -618,6 +630,395 @@ function renderTeamUpcoming(profile) {
       return '<div class="team-fixture-row"><span>' + safe(shortFixtureDate(date)) + '</span><b class="fixture-venue">' + (isHome ? 'L' : 'V') + '</b><span class="fixture-opponent">' + logo + '<strong>' + safe(opponentName) + '</strong></span><time>' + safe(localTime(date)) + '</time></div>';
     }).join('') + '</div>';
 }
+
+function profileValue(value) {
+  if (value == null) return '';
+  if (typeof value === 'object') return value.displayName || value.fullName || value.name || value.label || value.abbreviation || value.shortName || value.value || '';
+  return String(value);
+}
+function playerProfileButton(player, team, leagueId, label) {
+  const id = String(player?.id || player?.athleteId || player?.uid || '');
+  const name = player?.displayName || player?.fullName || player?.name || label || '';
+  if (!name) return '';
+  const teamName = profileValue(team?.displayName || team?.name || team?.shortDisplayName || team);
+  const teamLogo = team?.logo || team?.logos?.[0]?.href || '';
+  const headshot = player?.headshot?.href || player?.headshot || player?.photo?.href || player?.photo || '';
+  const position = profileValue(player?.position?.displayName || player?.position?.name || player?.position?.abbreviation || player?.position || '');
+  const birthDate = player?.dateOfBirth || player?.birthDate || player?.birthdate || '';
+  const nationality = profileValue(player?.citizenship || player?.nationality || player?.country || player?.nationalityCountry || '');
+  const height = player?.displayHeight || player?.height || '';
+  const age = player?.age || '';
+  return '<button type="button" class="player-profile-link" data-player-profile data-player-id="' + safe(id) + '" data-player-name="' + safe(name) + '" data-player-team-name="' + safe(teamName) + '" data-player-team-logo="' + safe(teamLogo) + '" data-player-league="' + safe(leagueId || 'arg.1') + '" data-player-headshot="' + safe(typeof headshot === 'string' ? headshot : '') + '" data-player-height="' + safe(height) + '" data-player-age="' + safe(age) + '" data-player-birth="' + safe(birthDate) + '" data-player-nationality="' + safe(nationality) + '" data-player-position="' + safe(position) + '">' + safe(label || name) + '</button>';
+}
+function unwrapPlayerProfile(value) {
+  if (!value || typeof value !== 'object') return {};
+  return value.athlete || value.player || value.data?.athlete || value.data?.player || value.data || value;
+}
+function playerProfileDate(player, fallback = '') {
+  return player?.dateOfBirth || player?.birthDate || player?.birthdate || player?.birth?.date || fallback || '';
+}
+function formatPlayerBirthday(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat('es-AR', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' }).format(date);
+}
+function playerAgeAtDate(birthDate, fallbackAge) {
+  if (birthDate) {
+    const text = String(birthDate).slice(0, 10);
+    const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const today = dateParts(todayKey());
+      const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+      return String(today.year - year - (today.month < month || (today.month === month && today.day < day) ? 1 : 0));
+    }
+  }
+  return fallbackAge != null && String(fallbackAge).trim() ? String(fallbackAge) : '—';
+}
+function playerHeightText(player, fallback = '') {
+  const raw = player?.displayHeight || player?.height || fallback || '';
+  if (typeof raw === 'string' && /cm|m\b|['"]/i.test(raw)) return raw;
+  const number = Number(raw);
+  if (!Number.isFinite(number) || number <= 0) return '—';
+  if (number >= 140) return Math.round(number) + ' cm';
+  if (number >= 55 && number <= 90) return Math.round(number * 2.54) + ' cm';
+  return String(raw);
+}
+const PLAYER_PROFILE_STAT_ALIASES = {
+  appearances: ['appearances','gamesPlayed','games','matches','apps'],
+  starts: ['starts','gamesStarted'],
+  minutes: ['minutes','minutesPlayed','mins'],
+  goals: ['goals','totalGoals','goal'],
+  assists: ['assists','goalAssists','assist'],
+  shots: ['shots','totalShots','totalAttempts'],
+  shotsOnTarget: ['shotsOnTarget','shotsOnGoal','sot'],
+  keyPasses: ['keyPasses','shotAssists','chancesCreated'],
+  tackles: ['tackles','effectiveTackles','successfulTackles'],
+  interceptions: ['interceptions'],
+  clearances: ['clearances','totalClearance'],
+  saves: ['saves','goalkeeperSaves'],
+  yellowCards: ['yellowCards','yellowCard','yc'],
+  redCards: ['redCards','redCard','rc'],
+  rating: ['rating','averageRating','avgRating','playerRating']
+};
+function playerProfileStatMap(value, inheritedKeys = [], depth = 0) {
+  const result = {};
+  if (!value || typeof value !== 'object' || depth > 7) return result;
+  const aliases = new Set(Object.values(PLAYER_PROFILE_STAT_ALIASES).flat().map(ratingKey));
+  const add = (key, raw) => {
+    const normalized = ratingKey(key);
+    const numeric = ratingNumber(raw);
+    if (aliases.has(normalized) && numeric !== undefined && result[normalized] === undefined) result[normalized] = numeric;
+  };
+  if (Array.isArray(value)) {
+    value.forEach(item => {
+      if (item && typeof item === 'object') {
+        const statName = item.name || item.abbreviation || item.displayName || item.label || item.shortDisplayName;
+        if (statName) add(statName, item.value ?? item.displayValue ?? item.display ?? item.stat);
+        Object.assign(result, playerProfileStatMap(item, inheritedKeys, depth + 1));
+      }
+    });
+    return result;
+  }
+  const direct = playerStatsFromRecord(value, inheritedKeys);
+  Object.entries(direct).forEach(([key, raw]) => add(key, raw));
+  Object.entries(value).forEach(([key, raw]) => {
+    if (aliases.has(ratingKey(key)) && (typeof raw === 'number' || typeof raw === 'string')) add(key, raw);
+  });
+  const nextKeys = value.keys || value.labels || value.statKeys || inheritedKeys;
+  for (const childKey of ['categories','stats','statistics','splits','values','seasonStats','items','entries','events']) {
+    if (value[childKey] && typeof value[childKey] === 'object') {
+      Object.assign(result, playerProfileStatMap(value[childKey], nextKeys, depth + 1));
+    }
+  }
+  return result;
+}
+function playerProfileStatValue(stats, metric) {
+  for (const alias of PLAYER_PROFILE_STAT_ALIASES[metric] || []) {
+    const value = stats?.[ratingKey(alias)];
+    if (value !== undefined && value !== null) return ratingNumber(value);
+  }
+  return undefined;
+}
+function playerProfileHasStats(stats) {
+  return ['appearances','minutes','goals','assists','rating'].some(key => playerProfileStatValue(stats, key) !== undefined);
+}
+function profileSeasonName(value) {
+  if (value && typeof value === 'object') {
+    return profileSeasonName(value.year || value.displayName || value.name || value.abbreviation || value.id || value.startDate);
+  }
+  const text = String(value || '').trim();
+  const match = text.match(/(?:19|20)\d{2}(?:\s*[\/-]\s*(?:\d{2}|(?:19|20)\d{2}))?/);
+  return match ? match[0].replace(/\s+/g, '') : '';
+}
+function profileTeamName(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  return value.displayName || value.shortDisplayName || value.name || value.abbreviation || '';
+}
+function hasPlayerSeasonDescendant(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 8) return false;
+  if (Array.isArray(value)) return value.some(item => hasPlayerSeasonDescendant(item, depth + 1));
+  for (const [key, child] of Object.entries(value)) {
+    if (/^season(?:Year)?$/i.test(key) && profileSeasonName(child)) return true;
+    if (/^(?:19|20)\d{2}(?:[\/-]\d{2,4})?$/.test(key)) return true;
+    if (hasPlayerSeasonDescendant(child, depth + 1)) return true;
+  }
+  return false;
+}
+function collectPlayerSeasonStats(source, fallbackTeam = '') {
+  const seasons = new Map();
+  if (!source || typeof source !== 'object') return [];
+  const fallbackYear = dateParts(todayKey()).year;
+  const hasExplicitSeasons = hasPlayerSeasonDescendant(source);
+  function walk(value, inheritedSeason = '', inheritedTeam = '', key = '', depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 10) return;
+    const directSeason = profileSeasonName(value.season || value.seasonYear || value.year || value.seasonName)
+      || (/^(?:19|20)\d{2}(?:[\/-]\d{2,4})?$/.test(key) ? profileSeasonName(key) : '');
+    const season = directSeason || inheritedSeason || (!hasExplicitSeasons && depth === 0 ? String(fallbackYear) : '');
+    const team = profileTeamName(value.team || value.club || value.teamName || value.clubName) || inheritedTeam;
+    if (season) {
+      const stats = playerProfileStatMap(value, value.keys || value.labels || value.statKeys || []);
+      if (playerProfileHasStats(stats)) {
+        const currentYear = String(fallbackYear);
+        const teamName = team || (season.includes(currentYear) ? fallbackTeam : '') || 'Equipo no informado';
+        const id = season + '|' + teamName.toLowerCase();
+        if (!seasons.has(id)) seasons.set(id, { season, team: teamName, stats: {} });
+        const row = seasons.get(id);
+        Object.entries(stats).forEach(([stat, amount]) => {
+          if (row.stats[stat] === undefined) row.stats[stat] = amount;
+        });
+      }
+    }
+    for (const [childKey, child] of Object.entries(value)) {
+      if (child && typeof child === 'object') walk(child, season, team, childKey, depth + 1);
+    }
+  }
+  walk(source, '', '', '', 0);
+  return [...seasons.values()];
+}
+function playerProfileMatchRating(stats, position) {
+  const provided = playerProfileStatValue(stats, 'rating');
+  if (provided !== undefined && provided >= 0 && provided <= 10) return provided;
+  const metric = key => playerProfileStatValue(stats, key) || 0;
+  const cap = (key, maximum) => Math.min(Math.max(metric(key), 0), maximum);
+  let rating = 6;
+  rating += cap('goals', 4) * 1.2 + cap('assists', 4) * .75 + cap('shotsOnTarget', 6) * .1 + cap('shots', 8) * .04;
+  rating += cap('keyPasses', 6) * .1 + cap('tackles', 7) * .07 + cap('interceptions', 7) * .07 + cap('clearances', 8) * .04;
+  rating += cap('saves', 8) * .16;
+  rating += cap('yellowCards', 2) * -.4 + cap('redCards', 2) * -1.8;
+  if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/i.test(String(position || ''))) rating += cap('goalsConceded', 6) * -.2;
+  return Math.round(Math.max(0, Math.min(10, rating)) * 100) / 100;
+}
+function collectPlayerGameLog(payload, fallbackTeam = '', position = '') {
+  const rows = new Map();
+  function walk(value, inheritedKeys = [], depth = 0) {
+    if (!value || typeof value !== 'object' || depth > 11) return;
+    if (Array.isArray(value)) {
+      value.forEach(item => walk(item, inheritedKeys, depth + 1));
+      return;
+    }
+    const keys = value.keys || value.labels || value.statKeys || inheritedKeys;
+    const event = value.event && typeof value.event === 'object' ? value.event : {};
+    const date = value.date || value.gameDate || value.eventDate || event.date || value.competition?.date || '';
+    const hasGameIdentity = Boolean(value.event || value.eventId || value.gameId || value.opponent || value.opponentDisplayName || value.competition);
+    const stats = playerStatsFromRecord(value, keys);
+    const normalizedStats = {};
+    Object.entries(stats).forEach(([key, amount]) => {
+      const numeric = ratingNumber(amount);
+      if (numeric !== undefined) normalizedStats[ratingKey(key)] = numeric;
+    });
+    const hasPerformance = playerProfileHasStats(normalizedStats);
+    if (date && hasGameIdentity && hasPerformance) {
+      const season = profileSeasonName(value.season || event.season) || String(date).slice(0, 4);
+      const team = profileTeamName(value.team || event.team) || (String(date).slice(0, 4) === String(dateParts(todayKey()).year) ? fallbackTeam : '') || 'Equipo no informado';
+      const id = season + '|' + team.toLowerCase();
+      if (!rows.has(id)) rows.set(id, { season, team, stats: {}, ratings: [], matches: 0 });
+      const row = rows.get(id);
+      row.matches += 1;
+      Object.entries(normalizedStats).forEach(([key, amount]) => {
+        row.stats[key] = (row.stats[key] || 0) + amount;
+      });
+      row.ratings.push({ value: playerProfileMatchRating(normalizedStats, position), estimated: playerProfileStatValue(normalizedStats, 'rating') === undefined });
+    }
+    for (const [childKey, child] of Object.entries(value)) {
+      if (child && typeof child === 'object') walk(child, keys, depth + 1);
+    }
+  }
+  walk(payload);
+  return [...rows.values()];
+}
+function averagePlayerSeasonRating(stats, appearances, position) {
+  const supplied = playerProfileStatValue(stats, 'rating');
+  if (supplied !== undefined && supplied >= 0 && supplied <= 10) return { value: supplied, estimated: false };
+  if (!appearances || appearances <= 0) return { value: null, estimated: false };
+  const perGame = {};
+  Object.keys(PLAYER_PROFILE_STAT_ALIASES).forEach(key => {
+    const total = playerProfileStatValue(stats, key);
+    if (total !== undefined) perGame[ratingKey(PLAYER_PROFILE_STAT_ALIASES[key][0])] = total / appearances;
+  });
+  return { value: playerProfileMatchRating(perGame, position), estimated: true };
+}
+function collectPlayerCareerRows(profile) {
+  const fallbackTeam = profile.teamName || '';
+  const fallbackPosition = profile.player?.position || '';
+  const seasonRows = [
+    ...collectPlayerSeasonStats(profile.stats, fallbackTeam),
+    ...collectPlayerSeasonStats(profile.bio, fallbackTeam)
+  ];
+  const merged = new Map();
+  seasonRows.forEach(row => {
+    const key = row.season + '|' + row.team.toLowerCase();
+    const existing = merged.get(key) || { ...row, stats: {} };
+    Object.entries(row.stats).forEach(([name, value]) => {
+      if (existing.stats[name] === undefined) existing.stats[name] = value;
+    });
+    merged.set(key, existing);
+  });
+  const gameRows = collectPlayerGameLog(profile.gamelog, fallbackTeam, fallbackPosition);
+  gameRows.forEach(game => {
+    const sameSeason = [...merged.values()].find(row => row.season === game.season
+      && (row.team.toLowerCase() === game.team.toLowerCase() || row.team === 'Equipo no informado' || game.team === 'Equipo no informado'));
+    const row = sameSeason || { season: game.season, team: game.team, stats: {} };
+    Object.entries(game.stats).forEach(([name, value]) => {
+      if (sameSeason) row.stats[name] = value;
+      else if (row.stats[name] === undefined) row.stats[name] = value;
+    });
+    row.matchRatings = game.ratings;
+    row.matchesFromLog = game.matches;
+    if (!sameSeason) merged.set(game.season + '|' + game.team.toLowerCase(), row);
+  });
+  return [...merged.values()].map(row => {
+    const appearances = playerProfileStatValue(row.stats, 'appearances') ?? row.matchesFromLog ?? 0;
+    const officialRating = averagePlayerSeasonRating(row.stats, appearances, fallbackPosition);
+    const logAverage = row.matchRatings?.length
+      ? row.matchRatings.reduce((sum, item) => sum + item.value, 0) / row.matchRatings.length
+      : null;
+    const rating = logAverage == null ? officialRating : { value: logAverage, estimated: row.matchRatings.some(item => item.estimated) };
+    const team = row.team === 'Equipo no informado' && row.season.includes(String(dateParts(todayKey()).year)) ? fallbackTeam || row.team : row.team;
+    return {
+      ...row,
+      team,
+      appearances,
+      goals: playerProfileStatValue(row.stats, 'goals'),
+      assists: playerProfileStatValue(row.stats, 'assists'),
+      minutes: playerProfileStatValue(row.stats, 'minutes'),
+      rating
+    };
+  }).sort((a, b) => b.season.localeCompare(a.season, 'es') || a.team.localeCompare(b.team, 'es'));
+}
+function renderPlayerProfile(event) {
+  const profile = state.playerProfile || {};
+  const athlete = unwrapPlayerProfile(profile.bio || {});
+  const player = profile.player || {};
+  const currentTeam = athlete.team && typeof athlete.team === 'object' ? athlete.team : {};
+  const club = profileValue(currentTeam.displayName || currentTeam.name || currentTeam.shortDisplayName) || profile.teamName || 'Club no informado';
+  const clubLogo = currentTeam.logo || currentTeam.logos?.[0]?.href || profile.teamLogo || '';
+  const name = athlete.displayName || athlete.fullName || athlete.name || player.name || profile.playerName || 'Jugador';
+  const position = profileValue(athlete.position || player.position || profile.position || '');
+  const headshotValue = athlete.headshot?.href || athlete.headshot || athlete.photo?.href || athlete.photo || profile.headshot || '';
+  const headshot = typeof headshotValue === 'string' && /^https:\/\//i.test(headshotValue) ? headshotValue : '';
+  const initials = name.trim().split(/\s+/).map(word => word[0]).slice(0, 2).join('').toUpperCase() || '⚽';
+  const birthDate = playerProfileDate(athlete, profile.birthDate);
+  const age = playerAgeAtDate(birthDate, athlete.age || profile.age);
+  const nationality = profileValue(athlete.citizenship || athlete.nationality || athlete.country || athlete.nationalityCountry || profile.nationality) || '—';
+  const height = playerHeightText(athlete, profile.height);
+  const avatar = '<span class="player-profile-avatar-fallback">' + safe(initials) + '</span>'
+    + (headshot ? '<img class="player-profile-photo" src="' + safe(headshot) + '" alt="' + safe(name) + '" loading="lazy">' : '');
+  const rows = collectPlayerCareerRows({ ...profile, player: { ...player, position } });
+  const career = rows.length
+    ? '<div class="player-career-table"><div class="player-career-head"><span>TEMPORADA</span><span>EQUIPO</span><span>PJ</span><span>G</span><span>A</span><span>NOTA</span></div>'
+      + rows.map(row => '<div class="player-career-row"><strong>' + safe(row.season) + '</strong><span class="player-career-club">' + safe(row.team || '—') + '</span><span>' + safe(row.appearances || '—') + '</span><span>' + safe(row.goals ?? '—') + '</span><span>' + safe(row.assists ?? '—') + '</span><b title="' + safe(row.rating?.estimated ? 'Promedio estimado con estadísticas disponibles' : 'Calificación promedio publicada') + '">' + (row.rating?.value == null ? '—' : (row.rating.estimated ? '≈' : '') + row.rating.value.toFixed(1)) + '</b></div>').join('') + '</div>'
+      + '<p class="player-career-note">PJ: partidos · G: goles · A: asistencias · ≈ promedio estimado según las estadísticas publicadas.</p>'
+    : '<div class="detail-note">' + (state.playerProfileLoading ? 'Buscando la trayectoria y las estadísticas del jugador…' : 'La fuente todavía no publicó estadísticas históricas para este jugador.') + '</div>';
+  const loadingStatus = state.playerProfileLoading ? 'ACTUALIZANDO DATOS…' : profile.refreshError ? 'DATOS PARCIALES' : 'PERFIL DEL JUGADOR';
+  return '<aside class="match-details player-profile-panel" aria-label="Ficha del jugador">'
+    + '<div class="team-profile-actions"><button type="button" class="team-profile-back" data-back-player>← ' + (state.teamProfile ? 'VOLVER AL PLANTEL' : 'VOLVER AL PARTIDO') + '</button><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar ficha">×</button></div>'
+    + '<header class="player-profile-hero"><div class="player-profile-avatar">' + avatar + '</div><div class="player-profile-title"><span>' + safe(loadingStatus) + '</span><h3>' + safe(name) + '</h3><div class="player-profile-club">' + (clubLogo ? '<img src="' + safe(clubLogo) + '" alt="" loading="lazy">' : '') + '<small>' + safe(club) + (position ? ' · ' + safe(position) : '') + '</small></div></div></header>'
+    + '<div class="player-profile-facts"><div><strong>' + safe(height) + '</strong><span>ALTURA</span></div><div><strong>' + safe(age) + ' años</strong><span>' + safe(formatPlayerBirthday(birthDate)) + '</span></div><div><strong>' + safe(nationality) + '</strong><span>PAÍS</span></div></div>'
+    + '<section class="detail-section player-career"><div class="detail-section-title"><h4>TRAYECTORIA PROFESIONAL</h4><span>' + rows.length + ' TEMPORADAS</span></div>' + career + '</section>'
+    + '</aside>';
+}
+function openPlayerProfile(event, button) {
+  const player = {
+    id: button.dataset.playerId || '',
+    name: button.dataset.playerName || 'Jugador',
+    position: button.dataset.playerPosition || '',
+    headshot: button.dataset.playerHeadshot || '',
+    height: button.dataset.playerHeight || '',
+    age: button.dataset.playerAge || '',
+    dateOfBirth: button.dataset.playerBirth || '',
+    nationality: button.dataset.playerNationality || ''
+  };
+  const playerId = String(player.id);
+  const request = ++state.playerProfileRequest;
+  state.playerProfile = {
+    matchId: String(event.id),
+    playerId,
+    player,
+    playerName: player.name,
+    teamName: button.dataset.playerTeamName || '',
+    teamLogo: button.dataset.playerTeamLogo || '',
+    leagueId: button.dataset.playerLeague || event._leagueId || 'arg.1',
+    position: player.position,
+    headshot: player.headshot,
+    height: player.height,
+    age: player.age,
+    birthDate: player.dateOfBirth,
+    nationality: player.nationality,
+    bio: null,
+    stats: null,
+    gamelog: null,
+    refreshError: false
+  };
+  state.playerProfileLoading = /^\d+$/.test(playerId);
+  renderMatches();
+  if (state.playerProfileLoading) loadPlayerProfile(event, playerId, request);
+}
+async function loadPlayerProfile(event, playerId, request) {
+  const leagueId = state.playerProfile?.leagueId || event._leagueId || 'arg.1';
+  const league = LEAGUES.find(item => item.id === leagueId) || LEAGUES[0];
+  const encodedId = encodeURIComponent(playerId);
+  const sitePath = '/' + league.path + '/athletes/' + encodedId + '?region=ar&lang=es';
+  const coreBase = 'https://sports.core.api.espn.com/v2/sports/soccer/leagues/' + encodeURIComponent(league.id);
+  const commonBase = 'https://site.web.api.espn.com/apis/common/v3/sports/' + league.path + '/athletes/' + encodedId;
+  const bioRequest = fetchFromEspn(sitePath).catch(() => fetchJson(coreBase + '/athletes/' + encodedId + '?region=ar&lang=es'));
+  const statsRequest = fetchJson(commonBase + '/stats?region=ar&lang=es').catch(() =>
+    fetchJson(coreBase + '/athletes/' + encodedId + '/statistics?region=ar&lang=es').catch(() => null));
+  const logRequest = fetchJson(commonBase + '/gamelog?region=ar&lang=es').catch(() => null);
+  const [bioResult, statsResult, logResult] = await Promise.allSettled([bioRequest, statsRequest, logRequest]);
+  if (request !== state.playerProfileRequest || state.playerProfile?.playerId !== String(playerId)
+      || state.playerProfile?.matchId !== String(event.id)) return;
+  const previous = state.playerProfile;
+  const bioFailed = bioResult.status !== 'fulfilled';
+  const statsFailed = statsResult.status !== 'fulfilled' || !statsResult.value;
+  const logFailed = logResult.status !== 'fulfilled' || !logResult.value;
+  let bio = bioFailed ? null : bioResult.value;
+  const athlete = unwrapPlayerProfile(bio);
+  let stats = statsFailed ? null : statsResult.value;
+  if ((!stats || !playerProfileHasStats(playerProfileStatMap(stats))) && athlete.statistics?.$ref) {
+    try { stats = await fetchJson(athlete.statistics.$ref); } catch {}
+  }
+  if (!stats || !playerProfileHasStats(playerProfileStatMap(stats))) {
+    try {
+      const coreStats = await fetchJson(coreBase + '/athletes/' + encodedId + '/statistics?region=ar&lang=es');
+      if (playerProfileHasStats(playerProfileStatMap(coreStats))) stats = coreStats;
+    } catch {}
+  }
+  if (request !== state.playerProfileRequest || state.playerProfile?.playerId !== String(playerId)
+      || state.playerProfile?.matchId !== String(event.id)) return;
+  state.playerProfile = {
+    ...previous,
+    bio: bio || { ...previous.player },
+    stats,
+    gamelog: logFailed ? null : logResult.value,
+    refreshError: bioFailed || statsFailed || logFailed,
+    updatedAt: Date.now()
+  };
+  state.playerProfileLoading = false;
+  renderMatches();
+}
+
 function renderTeamRoster(profile) {
   if (state.teamProfileLoading && !profile.roster) return '<div class="detail-note">Cargando el plantel completo…</div>';
   if (profile.rosterError && !profile.roster) return '<div class="detail-note">No se pudo cargar el plantel de este equipo.</div>';
@@ -626,7 +1027,7 @@ function renderTeamRoster(profile) {
   const groups = groupRoster(players);
   return '<div class="team-roster-summary"><strong>' + players.length + '</strong> JUGADORES · PLANTEL COMPLETO</div>'
     + groups.map(group => '<section class="roster-position-group"><h4>' + safe(group.name) + '<span>' + group.players.length + '</span></h4><ul>'
-      + group.players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span><strong>' + safe(player.name) + '</strong><small>' + safe(player.position || 'Posición no informada') + '</small></span></li>').join('')
+      + group.players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span>' + playerProfileButton(player, profile.team, profile.leagueId, player.name) + '<small>' + safe(player.position || 'Posición no informada') + '</small></span></li>').join('')
       + '</ul></section>').join('');
 }
 function teamProfileStatus(profile) {
@@ -664,8 +1065,9 @@ function teamProfileButton(competitor, side, title) {
   if (!teamId) return safe(title);
   return '<button type="button" class="team-profile-link" data-team-profile="' + side + '" aria-label="Ver ficha de ' + safe(title) + '">' + safe(title) + '</button>';
 }
-function renderLineupSide(title, players, side, competitor) {
-  return '<div class="lineup-side"><h5>' + teamProfileButton(competitor, side, title) + '</h5><ol>' + players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span title="' + safe(player.name) + '">' + safe(player.name) + '<small>' + safe(player.position) + '</small></span></li>').join('') + '</ol></div>';
+function renderLineupSide(title, players, side, competitor, leagueId) {
+  const team = competitor?.team || competitor || { displayName: title };
+  return '<div class="lineup-side"><h5>' + teamProfileButton(competitor, side, title) + '</h5><ol>' + players.map(player => '<li><b>' + safe(player.jersey || '·') + '</b><span title="' + safe(player.name) + '">' + playerProfileButton(player, team, leagueId, player.name) + '<small>' + safe(player.position) + '</small></span></li>').join('') + '</ol></div>';
 }
 function ratingKey(value) {
   if (value && typeof value === 'object') value = value.name || value.abbreviation || value.displayName || value.label || '';
@@ -717,6 +1119,11 @@ function matchPlayerRatings(summary, event) {
         surname: player.lastName || player.surname || '',
         position: player.position?.abbreviation || player.position?.displayName || player.position?.name || player.position || '',
         jersey: player.jersey || player.jerseyNumber || player.uniform || '',
+        headshot: player.headshot || player.photo || '',
+        displayHeight: player.displayHeight || player.height || '',
+        age: player.age || '',
+        dateOfBirth: player.dateOfBirth || player.birthDate || '',
+        citizenship: player.citizenship || player.nationality || '',
         stats: {}, starter: false, goalkeeper: false
       };
       entries.set(key, entry);
@@ -724,6 +1131,11 @@ function matchPlayerRatings(summary, event) {
     }
     Object.assign(entry.stats, stats);
     if (player.lastName || player.surname) entry.surname = player.lastName || player.surname;
+    entry.headshot = entry.headshot || player.headshot || player.photo || '';
+    entry.displayHeight = entry.displayHeight || player.displayHeight || player.height || '';
+    entry.age = entry.age || player.age || '';
+    entry.dateOfBirth = entry.dateOfBirth || player.dateOfBirth || player.birthDate || '';
+    entry.citizenship = entry.citizenship || player.citizenship || player.nationality || '';
     const positionText = [player.position?.name, player.position?.displayName, player.position?.abbreviation || player.position].filter(Boolean).join(' ').toLowerCase();
     if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/.test(positionText)) entry.goalkeeper = true;
     if (player.starter || player.isStarter || player.isStarting) entry.starter = true;
@@ -858,16 +1270,18 @@ function ratingSurname(player) {
   const parts = String(player.name || '').trim().split(/\s+/);
   return parts.length > 1 ? parts[parts.length - 1] : (parts[0] || '');
 }
-function renderPlayerRatingSide(name, players) {
+function renderPlayerRatingSide(team, players, leagueId) {
   const rated = players.filter(player => player.played);
   if (!rated.length) return '<div class="detail-note">Todavía no hay jugadores publicados.</div>';
-  return '<section class="rating-team"><h5>' + safe(name) + '</h5><ol class="player-rating-list">'
+  const teamName = profileValue(team?.shortDisplayName || team?.displayName || team?.name || team);
+  return '<section class="rating-team"><h5>' + safe(teamName) + '</h5><ol class="player-rating-list">'
     + rated.map(player => {
       const delta = player.rating - 6;
       const deltaText = delta === 0 ? '6,00 inicial' : (delta > 0 ? '+' : '') + delta.toFixed(2).replace('.', ',');
       const title = player.changes.length ? player.changes.join(' · ') : 'Sin acciones individuales publicadas · nota base 6,00';
       const position = player.position ? '<small>' + safe(player.position) + '</small>' : '';
-      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + safe(ratingSurname(player)) + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(1) + '</b></li>';
+      const link = playerProfileButton(player, team, leagueId, ratingSurname(player));
+      return '<li title="' + safe(title) + '"><span class="rating-player"><b>' + safe(player.jersey || '·') + '</b><strong>' + link + position + '</strong></span><span class="rating-change ' + (delta > 0 ? 'up' : delta < 0 ? 'down' : '') + '">' + safe(deltaText) + '</span><b class="rating-score">' + player.rating.toFixed(1) + '</b></li>';
     }).join('') + '</ol></section>';
 }
 function renderPlayerRatings(event) {
@@ -876,13 +1290,14 @@ function renderPlayerRatings(event) {
   const { home, away } = getParticipants(event);
   const label = phase === 'finished' ? 'NOTA FINAL' : phase === 'live' ? 'EN VIVO · ESTIMADA' : 'BASE · 6,00';
   const content = ratings.home.some(player => player.played) || ratings.away.some(player => player.played)
-    ? '<div class="rating-sides">' + renderPlayerRatingSide(home.team?.shortDisplayName || home.team?.displayName || 'Local', ratings.home)
-      + renderPlayerRatingSide(away.team?.shortDisplayName || away.team?.displayName || 'Visitante', ratings.away) + '</div>'
+    ? '<div class="rating-sides">' + renderPlayerRatingSide(home.team || home, ratings.home, event._leagueId)
+      + renderPlayerRatingSide(away.team || away, ratings.away, event._leagueId) + '</div>'
     : '<div class="detail-note">' + (phase === 'upcoming' ? 'Las notas comienzan en 6,00 cuando se confirmen las alineaciones.' : 'ESPN todavía no publicó los datos individuales de este partido.') + '</div>';
   return '<section class="detail-section player-ratings"><div class="detail-section-title"><h4>CALIFICACIONES</h4><span class="' + (phase === 'finished' ? 'confirmed' : '') + '">' + label + '</span></div>'
     + content + '<details class="rating-method"><summary>CRITERIOS Y ESCALA</summary><p>Base 6,00 · límite 0,00–10,00. Suma por goles, asistencias, remates al arco, pases clave, regates, entradas, intercepciones, despejes, recuperaciones, duelos ganados y atajadas. Resta por tarjetas, goles en contra, faltas, pérdidas, errores y penales fallados o cometidos. Se actualiza con las estadísticas que ESPN publique.</p></details></section>';
 }
 function renderMatchDetails(event) {
+  if (state.playerProfile && state.playerProfile.matchId === String(event.id)) return renderPlayerProfile(event);
   if (state.teamProfile && state.teamProfile.matchId === String(event.id)) return renderTeamProfile();
   const { home, away } = getParticipants(event);
   const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
@@ -895,7 +1310,7 @@ function renderMatchDetails(event) {
     : phase === 'upcoming' ? 'NO CONFIRMADAS'
     : state.matchDetailsError ? 'NO DISPONIBLES' : 'SIN PUBLICAR';
   const lineupContent = lineups.confirmed
-    ? '<div class="lineup-teams">' + renderLineupSide(homeName, lineups.home, 'home', home) + renderLineupSide(awayName, lineups.away, 'away', away) + '</div>'
+    ? '<div class="lineup-teams">' + renderLineupSide(homeName, lineups.home, 'home', home, event._leagueId) + renderLineupSide(awayName, lineups.away, 'away', away, event._leagueId) + '</div>'
     : '<div class="detail-note">' + (loading ? 'Consultando la información del partido…' : phase === 'upcoming' ? 'Las alineaciones todavía no fueron confirmadas.' : state.matchDetailsError ? 'No se pudieron cargar las alineaciones.' : 'La fuente todavía no publicó las alineaciones.') + '</div>';
   const substitutionsContent = substitutions.length
     ? '<ol class="substitution-list">' + substitutions.map(item => '<li><b>' + safe(item.minute || 'CAMBIO') + '</b>' + (item.incoming && item.outgoing
@@ -983,6 +1398,9 @@ function renderMatches() {
         state.teamProfile = null;
         state.teamProfileLoading = false;
         state.teamProfileRequest += 1;
+        state.playerProfile = null;
+        state.playerProfileLoading = false;
+        state.playerProfileRequest += 1;
         state.matchDetailRequest += 1;
         renderMatches();
         return;
@@ -994,6 +1412,9 @@ function renderMatches() {
       state.teamProfile = null;
       state.teamProfileLoading = false;
       state.teamProfileRequest += 1;
+      state.playerProfile = null;
+      state.playerProfileLoading = false;
+      state.playerProfileRequest += 1;
       state.matchDetailRequest += 1;
       renderMatches();
       loadMatchDetails(event, true);
@@ -1013,6 +1434,9 @@ function renderMatches() {
     state.teamProfile = null;
     state.teamProfileLoading = false;
     state.teamProfileRequest += 1;
+    state.playerProfile = null;
+    state.playerProfileLoading = false;
+    state.playerProfileRequest += 1;
     state.matchDetailRequest += 1;
     renderMatches();
   });
@@ -1024,6 +1448,17 @@ function renderMatches() {
     renderMatches();
   }));
   list.querySelector('[data-enable-alerts]')?.addEventListener('click', enableMatchAlerts);
+  list.querySelectorAll('[data-player-profile]').forEach(button => button.addEventListener('click', () => {
+    const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+    if (event) openPlayerProfile(event, button);
+  }));
+  list.querySelectorAll('.player-profile-photo').forEach(image => image.addEventListener('error', () => image.remove()));
+  list.querySelector('[data-back-player]')?.addEventListener('click', () => {
+    state.playerProfile = null;
+    state.playerProfileLoading = false;
+    state.playerProfileRequest += 1;
+    renderMatches();
+  });
   list.querySelectorAll('[data-team-profile]').forEach(button => button.addEventListener('click', () => {
     const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
     if (!event) return;
@@ -1038,6 +1473,9 @@ function renderMatches() {
   list.querySelector('[data-back-match]')?.addEventListener('click', () => {
     state.teamProfile = null;
     state.teamProfileLoading = false;
+        state.playerProfile = null;
+        state.playerProfileLoading = false;
+        state.playerProfileRequest += 1;
     state.teamProfileRequest += 1;
     renderMatches();
   });
@@ -1048,6 +1486,9 @@ function renderMatches() {
   }));
 }
 function openTeamProfile(event, competitor) {
+  state.playerProfile = null;
+  state.playerProfileLoading = false;
+  state.playerProfileRequest += 1;
   const team = competitor.team || competitor;
   const teamId = String(team.id || competitor.id || '');
   const leagueId = event._leagueId || 'arg.1';
@@ -1380,6 +1821,9 @@ document.querySelectorAll('.filter').forEach(button => button.addEventListener('
   state.matchDetailsLoading = false;
   state.teamProfile = null;
   state.teamProfileLoading = false;
+        state.playerProfile = null;
+        state.playerProfileLoading = false;
+        state.playerProfileRequest += 1;
   state.teamProfileRequest += 1;
   state.matchDetailRequest += 1;
   renderMatches();
@@ -1391,6 +1835,9 @@ function selectDate(date) {
   state.matchDetailsLoading = false;
   state.teamProfile = null;
   state.teamProfileLoading = false;
+        state.playerProfile = null;
+        state.playerProfileLoading = false;
+        state.playerProfileRequest += 1;
   state.teamProfileRequest += 1;
   state.matchDetailRequest += 1;
   document.querySelector('#datePicker').value = date;
