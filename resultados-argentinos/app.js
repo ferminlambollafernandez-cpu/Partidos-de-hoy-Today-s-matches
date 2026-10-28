@@ -692,47 +692,31 @@ const PLAYER_PROFILE_STAT_ALIASES = {
   assists: ['assists','goalAssists','assist'],
   shots: ['shots','totalShots','totalAttempts'],
   shotsOnTarget: ['shotsOnTarget','shotsOnGoal','sot'],
-  keyPasses: ['keyPasses','shotAssists','chancesCreated'],
+  expectedGoals: ['expectedGoals','xG'],
+  expectedAssists: ['expectedAssists','xA'],
+  keyPasses: ['keyPasses','shotAssists','chancesCreated','bigChancesCreated'],
+  defensiveInterventions: ['defensiveInterventions'],
+  offsides: ['offsides'],
+  dribbles: ['successfulDribbles','dribblesCompleted','takeOnsWon'],
   tackles: ['tackles','effectiveTackles','successfulTackles'],
   interceptions: ['interceptions'],
   clearances: ['clearances','totalClearance'],
+  recoveries: ['ballRecoveries','recoveries'],
+  duelsWon: ['duelsWon','wonDuels','duelWon','effectiveDuels'],
   saves: ['saves','goalkeeperSaves'],
+  penaltiesSaved: ['penaltiesSaved','penaltySaves'],
+  goalsConceded: ['goalsConceded','goalsAgainst'],
   yellowCards: ['yellowCards','yellowCard','yc'],
   redCards: ['redCards','redCard','rc'],
+  ownGoals: ['ownGoals','ownGoal'],
+  fouls: ['foulsCommitted','fouls'],
+  dispossessed: ['dispossessed','turnovers','possessionLost'],
+  errors: ['errorsLeadingToGoal','errors','mistakes'],
+  penaltiesMissed: ['penaltiesMissed','penaltyMissed'],
+  penaltiesConceded: ['penaltiesConceded','penaltyConceded'],
+  bigChancesMissed: ['bigChancesMissed','bigChanceMissed'],
   rating: ['rating','averageRating','avgRating','playerRating']
 };
-function playerProfileStatMap(value, inheritedKeys = [], depth = 0) {
-  const result = {};
-  if (!value || typeof value !== 'object' || depth > 7) return result;
-  const aliases = new Set(Object.values(PLAYER_PROFILE_STAT_ALIASES).flat().map(ratingKey));
-  const add = (key, raw) => {
-    const normalized = ratingKey(key);
-    const numeric = ratingNumber(raw);
-    if (aliases.has(normalized) && numeric !== undefined && result[normalized] === undefined) result[normalized] = numeric;
-  };
-  if (Array.isArray(value)) {
-    value.forEach(item => {
-      if (item && typeof item === 'object') {
-        const statName = item.name || item.abbreviation || item.displayName || item.label || item.shortDisplayName;
-        if (statName) add(statName, item.value ?? item.displayValue ?? item.display ?? item.stat);
-        Object.assign(result, playerProfileStatMap(item, inheritedKeys, depth + 1));
-      }
-    });
-    return result;
-  }
-  const direct = playerStatsFromRecord(value, inheritedKeys);
-  Object.entries(direct).forEach(([key, raw]) => add(key, raw));
-  Object.entries(value).forEach(([key, raw]) => {
-    if (aliases.has(ratingKey(key)) && (typeof raw === 'number' || typeof raw === 'string')) add(key, raw);
-  });
-  const nextKeys = value.keys || value.labels || value.statKeys || inheritedKeys;
-  for (const childKey of ['categories','stats','statistics','splits','values','seasonStats','items','entries','events']) {
-    if (value[childKey] && typeof value[childKey] === 'object') {
-      Object.assign(result, playerProfileStatMap(value[childKey], nextKeys, depth + 1));
-    }
-  }
-  return result;
-}
 function playerProfileStatValue(stats, metric) {
   for (const alias of PLAYER_PROFILE_STAT_ALIASES[metric] || []) {
     const value = stats?.[ratingKey(alias)];
@@ -803,11 +787,16 @@ function playerProfileMatchRating(stats, position) {
   const metric = key => playerProfileStatValue(stats, key) || 0;
   const cap = (key, maximum) => Math.min(Math.max(metric(key), 0), maximum);
   let rating = 6;
-  rating += cap('goals', 4) * 1.2 + cap('assists', 4) * .75 + cap('shotsOnTarget', 6) * .1 + cap('shots', 8) * .04;
-  rating += cap('keyPasses', 6) * .1 + cap('tackles', 7) * .07 + cap('interceptions', 7) * .07 + cap('clearances', 8) * .04;
-  rating += cap('saves', 8) * .16;
-  rating += cap('yellowCards', 2) * -.4 + cap('redCards', 2) * -1.8;
-  if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/i.test(String(position || ''))) rating += cap('goalsConceded', 6) * -.2;
+  rating += cap('goals', 4) * 1.20 + cap('assists', 4) * .75 + cap('shotsOnTarget', 6) * .10 + cap('shots', 8) * .04;
+  rating += cap('expectedGoals', 2) * .20 + cap('expectedAssists', 1.5) * .20 + cap('keyPasses', 6) * .10;
+  rating += cap('defensiveInterventions', 8) * .05 + cap('offsides', 3) * -.05;
+  rating += cap('dribbles', 6) * .07 + cap('tackles', 7) * .07 + cap('interceptions', 7) * .07;
+  rating += cap('clearances', 8) * .04 + cap('recoveries', 12) * .025 + cap('duelsWon', 12) * .025;
+  rating += cap('saves', 8) * .16 + cap('penaltiesSaved', 2) * .70;
+  rating += cap('yellowCards', 2) * -.40 + cap('redCards', 2) * -1.80 + cap('ownGoals', 2) * -1.80;
+  rating += cap('fouls', 8) * -.025 + cap('dispossessed', 8) * -.05 + cap('errors', 3) * -.80;
+  rating += cap('penaltiesMissed', 2) * -.70 + cap('penaltiesConceded', 2) * -.45 + cap('bigChancesMissed', 4) * -.20;
+  if (/goalkeeper|arquero|portero|\bgk\b|\bpor\b/i.test(String(position || ''))) rating += cap('goalsConceded', 6) * -.20;
   return Math.round(Math.max(0, Math.min(10, rating)) * 100) / 100;
 }
 function collectPlayerGameLog(payload, fallbackTeam = '', position = '') {
@@ -1012,7 +1001,7 @@ async function loadPlayerProfile(event, playerId, request) {
     bio: bio || { ...previous.player },
     stats,
     gamelog: logFailed ? null : logResult.value,
-    refreshError: bioFailed || statsFailed || logFailed,
+    refreshError: bioFailed || (statsFailed && logFailed),
     updatedAt: Date.now()
   };
   state.playerProfileLoading = false;
