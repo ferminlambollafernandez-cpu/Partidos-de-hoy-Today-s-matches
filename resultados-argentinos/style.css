@@ -212,3 +212,19 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .player-career-note{margin:7px 1px 0;color:var(--muted);font-size:7px;line-height:1.45}
 @media(max-width:700px){.player-profile-panel{padding:12px}.player-profile-avatar{width:58px;height:58px;flex-basis:58px}.player-profile-title h3{font-size:18px}.player-profile-facts strong{font-size:11px}.player-career-head,.player-career-row{grid-template-columns:minmax(55px,.8fr) minmax(70px,1.3fr) 25px 21px 21px 39px;gap:3px;padding-right:5px;padding-left:5px}}
 
+
+/* Rondas de las copas eliminatorias */
+.cup-rounds-cell{height:auto!important;padding:0!important;text-align:left!important;background:rgba(8,22,31,.76)}
+.cup-rounds{padding:20px 22px;color:var(--white)}
+.cup-rounds-intro{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:0 0 15px;border-bottom:1px solid var(--line);margin-bottom:15px}
+.cup-rounds-intro div{display:grid;gap:5px}
+.cup-rounds-intro strong{font:900 12px 'Barlow Condensed',sans-serif;letter-spacing:1.5px;color:var(--yellow)}
+.cup-rounds-intro span{font-size:9px;font-weight:700;letter-spacing:.7px;color:#91a6af}
+.cup-rounds-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px}
+.cup-round-card{min-height:77px;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:12px 13px;border:1px solid rgba(121,215,237,.13);border-radius:8px;background:linear-gradient(145deg,rgba(121,215,237,.08),rgba(10,27,38,.72))}
+.cup-round-card>span{font-size:7px;font-weight:900;letter-spacing:1.2px;color:var(--sky)}
+.cup-round-card strong{font:800 12px 'Barlow Condensed',sans-serif;letter-spacing:.7px;color:var(--white)}
+.cup-round-card small{font-size:9px;font-weight:700;color:#849ba5}
+.cup-rounds>p{margin:14px 0 0;color:#718993;font-size:9px;font-weight:700;line-height:1.6}
+.cup-rounds-empty{padding:24px;color:#91a6af;font-size:11px;line-height:1.7}
+@media(max-width:700px){.cup-rounds{padding:15px 12px}.cup-rounds-intro{align-items:flex-start;flex-direction:column;gap:8px}.cup-rounds-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.cup-round-card{min-height:72px;padding:10px}.cup-round-card strong{font-size:11px}}
