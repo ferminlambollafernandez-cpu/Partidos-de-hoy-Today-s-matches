@@ -5,10 +5,14 @@ const TABLE_FALLBACK = 'https://site.web.api.espn.com/apis/v2/sports';
 const ARG_LEAGUE = 'soccer/arg.1';
 const LEAGUES = [
   { id: 'arg.1', path: 'soccer/arg.1', name: 'LIGA PROFESIONAL', icon: '🇦🇷' },
+  { id: 'arg.copa', path: 'soccer/arg.copa', name: 'COPA ARGENTINA', icon: '🏆', isCup: true },
   { id: 'eng.1', path: 'soccer/eng.1', name: 'PREMIER LEAGUE', icon: '🏴' },
+  { id: 'eng.league_cup', path: 'soccer/eng.league_cup', name: 'EFL CUP', icon: '🏆', isCup: true },
   { id: 'esp.1', path: 'soccer/esp.1', name: 'LA LIGA', icon: '🇪🇸' },
+  { id: 'esp.copa_del_rey', path: 'soccer/esp.copa_del_rey', name: 'COPA DEL REY', icon: '🏆', isCup: true },
   { id: 'usa.1', path: 'soccer/usa.1', name: 'MLS', icon: '🇺🇸' },
   { id: 'bra.1', path: 'soccer/bra.1', name: 'BRASILEIRÃO', icon: '🇧🇷' },
+  { id: 'bra.copa_do_brazil', path: 'soccer/bra.copa_do_brazil', name: 'COPA DO BRASIL', icon: '🏆', isCup: true },
   { id: 'uefa.champions', path: 'soccer/uefa.champions', name: 'CHAMPIONS LEAGUE', icon: '🏆' },
   { id: 'uefa.europa', path: 'soccer/uefa.europa', name: 'EUROPA LEAGUE', icon: '🟠' },
   { id: 'uefa.europa.conf', path: 'soccer/uefa.europa.conf', name: 'CONFERENCE LEAGUE', icon: '🟣' },
@@ -1494,7 +1498,7 @@ function renderMatches() {
         ? '<div class="empty-state error">No se pudieron cargar los partidos de esta liga.<br><button type="button" class="retry-feed">Reintentar</button></div>'
         : feedMatches.length ? feedMatches.map(renderMatch).join('')
           : `<div class="empty-state">${safe(state.filter === 'all' ? `No hay partidos programados para ${feed.league.name} en esta fecha.` : labels[state.filter])}</div>`;
-      const tableLink = `<a href="#tablas" data-table-league="${safe(feed.league.id)}">VER TABLA <span>↗</span></a>`;
+      const tableLink = `<a href="#tablas" data-table-league="${safe(feed.league.id)}">${feed.league.isCup ? 'VER LLAVES' : 'VER TABLA'} <span>↗</span></a>`;
       const anchor = feed.league.id === 'arg.1' ? ' id="ligas"' : '';
       const selectedEvent = feedMatches.find(event => String(event.id) === String(state.selectedMatchId));
       const detail = selectedEvent ? renderMatchDetails(selectedEvent) : '';
@@ -1727,8 +1731,9 @@ async function loadScores() {
     refreshFollowedLiveCards(nextMatches);
     state.scoresLoaded = true;
     state.season = feeds.find(feed => feed.league.id === 'arg.1')?.data?.leagues?.[0]?.season || state.season;
-    document.querySelector('#competitionLabel').textContent = 'ARGENTINA · EUROPA · SUDAMÉRICA · ESPN';
+    document.querySelector('#competitionLabel').textContent = 'ARGENTINA · EUROPA · SUDAMÉRICA · COPAS · ESPN';
     renderMatches();
+    if (LEAGUES.find(item => item.id === state.activeStandings)?.isCup) renderStandings();
     const time = new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date());
     const cadence = state.date === todayKey() ? ' · se actualiza cada minuto' : '';
     const failedFeeds = feeds.filter(feed => feed.error).length;
@@ -1869,31 +1874,98 @@ async function loadAnnualTable(year, currentData) {
     return null;
   }
 }
+function cupRoundLabel(value) {
+  const raw = String(value || '').trim();
+  const key = raw.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const labels = {
+    'preliminary round': 'RONDA PRELIMINAR',
+    'qualifying round': 'RONDA CLASIFICATORIA',
+    'first round': 'PRIMERA RONDA',
+    'second round': 'SEGUNDA RONDA',
+    'third round': 'TERCERA RONDA',
+    'fourth round': 'CUARTA RONDA',
+    'fifth round': 'QUINTA RONDA',
+    'round of 64': 'RONDA DE 64',
+    'round of 32': 'RONDA DE 32',
+    'round of 16': 'OCTAVOS DE FINAL',
+    'last 16': 'OCTAVOS DE FINAL',
+    'round of 8': 'CUARTOS DE FINAL',
+    'quarterfinal': 'CUARTOS DE FINAL',
+    'quarterfinals': 'CUARTOS DE FINAL',
+    'quarter finals': 'CUARTOS DE FINAL',
+    'cuartos de final': 'CUARTOS DE FINAL',
+    'octavos de final': 'OCTAVOS DE FINAL',
+    'semifinal': 'SEMIFINALES',
+    'semifinals': 'SEMIFINALES',
+    'semi finals': 'SEMIFINALES',
+    'semifinales': 'SEMIFINALES',
+    'final': 'FINAL'
+  };
+  return labels[key] || raw.toLocaleUpperCase('es-AR');
+}
+function cupRoundDates(entry) {
+  if (entry.detail) return String(entry.detail)
+    .replace(/\bJan\b/gi, 'ene').replace(/\bFeb\b/gi, 'feb').replace(/\bMar\b/gi, 'mar')
+    .replace(/\bApr\b/gi, 'abr').replace(/\bMay\b/gi, 'may').replace(/\bJun\b/gi, 'jun')
+    .replace(/\bJul\b/gi, 'jul').replace(/\bAug\b/gi, 'ago').replace(/\bSep\b/gi, 'sep')
+    .replace(/\bOct\b/gi, 'oct').replace(/\bNov\b/gi, 'nov').replace(/\bDec\b/gi, 'dic');
+  const format = value => value ? new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, day: 'numeric', month: 'short' }).format(new Date(value)) : '';
+  const start = format(entry.startDate), end = format(entry.endDate);
+  return start && end && start !== end ? start + ' — ' + end : start || end || 'Fechas a confirmar';
+}
+function renderCupRounds(data, league) {
+  if (!data) return '<div class="cup-rounds-empty">' + (state.scoresLoaded ? 'No se pudo obtener el calendario de rondas desde ESPN.' : 'Cargando las rondas de la copa…') + '</div>';
+  const calendars = data.leagues?.[0]?.calendar || data.calendar || [];
+  const entries = (Array.isArray(calendars) ? calendars : [calendars])
+    .flatMap(calendar => Array.isArray(calendar?.entries) ? calendar.entries : [])
+    .filter(entry => entry?.label);
+  const unique = [...new Map(entries.map(entry => [String(entry.value || '') + '|' + String(entry.label), entry])).values()];
+  if (!unique.length) return '<div class="cup-rounds-empty">ESPN todavía no publicó las rondas de esta temporada. Los partidos disponibles aparecen en Resultados según la fecha elegida.</div>';
+  const season = data.leagues?.[0]?.season?.displayName || data.season?.displayName || '';
+  return '<div class="cup-rounds"><div class="cup-rounds-intro"><div><strong>TORNEO ELIMINATORIO</strong><span>' + safe(season || league.name) + ' · calendario de ESPN</span></div><span>PARTIDOS Y GOLES EN RESULTADOS</span></div>'
+    + '<div class="cup-rounds-grid">' + unique.map((entry, index) => '<article class="cup-round-card"><span>FASE ' + safe(entry.value || String(index + 1)) + '</span><strong>' + safe(cupRoundLabel(entry.label)) + '</strong><small>' + safe(cupRoundDates(entry)) + '</small></article>').join('') + '</div>'
+    + '<p>Elegí una fecha con el calendario para ver los partidos, horarios y marcadores de cada ronda.</p></div>';
+}
 function renderStandings() {
   const competitions = document.querySelector('#standingsCompetitions');
   const tabs = document.querySelector('#standingsTabs');
   const body = document.querySelector('#standingsBody');
   const active = state.tableData[state.activeStandings] || { tables: [], league: LEAGUES.find(item => item.id === state.activeStandings), error: false };
   const league = active.league || LEAGUES[0];
+  const scoreFeed = state.feeds.find(feed => feed.league.id === league.id);
+  const data = active.data || scoreFeed?.data || null;
   const tableData = active.tables || [];
-  competitions.innerHTML = LEAGUES.map(item => `<button class="competition-tab ${item.id === state.activeStandings ? 'active' : ''}" data-table-competition="${safe(item.id)}" role="tab" aria-selected="${item.id === state.activeStandings}">${safe(item.name)}</button>`).join('');
+  const tableHead = document.querySelector('#tablas thead');
+  const title = document.querySelector('#tablas .table-title-row h2');
+  const allTableLink = document.querySelector('#tablas .all-table-link');
+  competitions.innerHTML = LEAGUES.map(item => '<button class="competition-tab ' + (item.id === state.activeStandings ? 'active' : '') + '" data-table-competition="' + safe(item.id) + '" role="tab" aria-selected="' + (item.id === state.activeStandings) + '">' + safe(item.name) + '</button>').join('');
   competitions.querySelectorAll('[data-table-competition]').forEach(button => button.addEventListener('click', () => {
     state.activeStandings = button.dataset.tableCompetition;
     state.activeTable = 0;
     renderStandings();
   }));
-  const seasonName = active.data?.leagues?.[0]?.season?.displayName || active.data?.season?.displayName || active.data?.season?.type?.name || 'POSICIONES';
-  document.querySelector('#tableCompetition').textContent = `${league.name} · ${seasonName}`;
+  const seasonName = data?.leagues?.[0]?.season?.displayName || data?.season?.displayName || data?.season?.type?.name || 'POSICIONES';
+  document.querySelector('#tableCompetition').textContent = league.isCup ? league.name + ' · ' + seasonName : league.name + ' · ' + seasonName;
+  title.innerHTML = league.isCup ? 'EL CAMINO <span>A LA FINAL</span>' : 'LA TABLA <span>DE POSICIONES</span>';
+  allTableLink.innerHTML = league.isCup ? 'RONDA POR RONDA <span>↗</span>' : 'TABLA COMPLETA <span>↗</span>';
+  if (league.isCup) {
+    tabs.innerHTML = '';
+    tableHead.innerHTML = '<tr><th colspan="8">FASES DEL TORNEO</th></tr>';
+    body.innerHTML = '<tr><td class="cup-rounds-cell" colspan="8">' + renderCupRounds(data, league) + '</td></tr>';
+    document.querySelector('#teamCount').textContent = '—';
+    return;
+  }
+  tableHead.innerHTML = '<tr><th class="position-col">#</th><th class="club-col">EQUIPO</th><th>PTS</th><th>PJ</th><th>DG</th><th>G</th><th>E</th><th>P</th></tr>';
   if (!tableData.length) {
     tabs.innerHTML = '';
-    body.innerHTML = `<tr><td class="empty-table" colspan="8">${active.error ? 'No se pudieron cargar las posiciones de esta competencia.' : 'La fuente todavía no publicó una tabla para esta competencia.'}</td></tr>`;
+    body.innerHTML = '<tr><td class="empty-table" colspan="8">' + (active.error ? 'No se pudieron cargar las posiciones de esta competencia.' : 'La fuente todavía no publicó una tabla para esta competencia.') + '</td></tr>';
     document.querySelector('#teamCount').textContent = '—';
     return;
   }
   state.activeTable = Math.min(state.activeTable, tableData.length - 1);
   tabs.innerHTML = tableData.map((table, index) => {
-    const title = table.name.replace(/(?:group|grupo)\s*a/i, 'Zona A').replace(/(?:group|grupo)\s*b/i, 'Zona B');
-    return `<button class="table-tab ${index === state.activeTable ? 'active' : ''}" data-standings-index="${index}" role="tab" aria-selected="${index === state.activeTable}">${safe(title.toLocaleUpperCase('es-AR'))}</button>`;
+    const titleText = table.name.replace(/(?:group|grupo)\s*a/i, 'Zona A').replace(/(?:group|grupo)\s*b/i, 'Zona B');
+    return '<button class="table-tab ' + (index === state.activeTable ? 'active' : '') + '" data-standings-index="' + index + '" role="tab" aria-selected="' + (index === state.activeTable) + '">' + safe(titleText.toLocaleUpperCase('es-AR')) + '</button>';
   }).join('');
   const selectedTable = tableData[state.activeTable];
   const isAnnual = /(?:tabla\s*anual|annual)/i.test(selectedTable.name || '');
@@ -1911,6 +1983,10 @@ async function loadStandings() {
   document.querySelector('#tableStatus').textContent = 'Cargando tablas de ESPN…';
   const year = dateParts(todayKey()).year;
   const feeds = await Promise.all(LEAGUES.map(async league => {
+    if (league.isCup) {
+      const scoreFeed = state.feeds.find(feed => feed.league.id === league.id);
+      return { league, data: scoreFeed?.data || null, tables: [], error: Boolean(scoreFeed?.error), isCup: true };
+    }
     try {
       const data = await fetchFromEspn(`/${league.path}/standings?season=${year}&region=ar&lang=es`, TABLE_BASE, TABLE_FALLBACK);
       let tables = collectStandingsTables(data);
@@ -1933,9 +2009,10 @@ async function loadStandings() {
   state.tables = argFeed?.tables || [];
   renderStandings();
   const time = new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit' }).format(new Date());
-  const available = feeds.filter(feed => feed.tables.length).length;
+  const leagueFeeds = feeds.filter(feed => !feed.league.isCup);
+  const available = leagueFeeds.filter(feed => feed.tables.length).length;
   const argAnnual = Boolean(argFeed?.annualAvailable);
-  document.querySelector('#tableStatus').textContent = `${available} de ${LEAGUES.length} tablas disponibles en ESPN${argAnnual ? ' · tabla anual suma Apertura y Clausura' : ''} · actualizado ${time}`;
+  document.querySelector('#tableStatus').textContent = `${available} de ${leagueFeeds.length} tablas de liga en ESPN · copas: rondas eliminatorias · actualizado ${time}${argAnnual ? ' · tabla anual suma Apertura y Clausura' : ''}`;
 }
 async function loadAll() {
   await Promise.all([loadScores(), loadStandings()]);
