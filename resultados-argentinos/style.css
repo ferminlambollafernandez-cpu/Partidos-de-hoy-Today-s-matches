@@ -228,3 +228,14 @@ h1{font-size:64px;letter-spacing:.8px;text-shadow:0 8px 38px rgba(0,0,0,.28)}.he
 .cup-rounds>p{margin:14px 0 0;color:#718993;font-size:9px;font-weight:700;line-height:1.6}
 .cup-rounds-empty{padding:24px;color:#91a6af;font-size:11px;line-height:1.7}
 @media(max-width:700px){.cup-rounds{padding:15px 12px}.cup-rounds-intro{align-items:flex-start;flex-direction:column;gap:8px}.cup-rounds-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.cup-round-card{min-height:72px;padding:10px}.cup-round-card strong{font-size:11px}}
+
+/* Clima del estadio en el panel del partido */
+.match-tools{align-items:center;flex-wrap:wrap}
+.match-weather{display:flex;align-items:center;gap:7px;min-width:112px;margin-left:auto;padding:5px 8px;border:1px solid rgba(121,215,237,.15);border-radius:7px;background:rgba(4,15,22,.32);color:var(--white)}
+.weather-icon{font-size:16px;line-height:1}
+.weather-copy{display:grid;min-width:0;gap:2px}
+.weather-copy b{font-size:11px;line-height:1;color:var(--white)}
+.weather-copy small{overflow:hidden;max-width:130px;color:var(--muted);font-size:7px;font-weight:900;letter-spacing:.45px;line-height:1.15;text-overflow:ellipsis;white-space:nowrap}
+.match-weather.is-loading .weather-copy b,.match-weather.is-empty .weather-copy b{color:var(--muted)}
+.match-weather.is-loading{border-color:rgba(121,215,237,.26)}
+@media(max-width:520px){.match-weather{margin-left:0;flex:1;min-width:120px}.weather-copy small{max-width:none}}
