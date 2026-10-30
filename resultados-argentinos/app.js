@@ -174,14 +174,152 @@ function renderAdvancedStats(event) {
     + rows.map(row => '<div class="stats-row"><span>' + row.label + '</span><strong>' + safe(row.values[0]) + '</strong><strong>' + safe(row.values[1]) + '</strong></div>').join('')
     + (hasData ? '' : '<div class="detail-note">ESPN todavía no publicó estas estadísticas para el partido.</div>') + '</section>';
 }
+
+const WEATHER_FORECAST_BASE = 'https://api.open-meteo.com/v1/forecast';
+const WEATHER_GEOCODING_BASE = 'https://geocoding-api.open-meteo.com/v1/search';
+
+function weatherTargetParts(isoDate, timeZone = TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23'
+  }).formatToParts(new Date(isoDate || Date.now()));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return { date: values.year + '-' + values.month + '-' + values.day, hour: values.hour };
+}
+function weatherLocationFromEvent(event) {
+  const competition = getCompetition(event);
+  const venue = competition.venue || event.venue || {};
+  const address = venue.address || {};
+  const coordinates = venue.coordinates || venue.location || {};
+  const latitude = Number(coordinates.latitude ?? venue.latitude);
+  const longitude = Number(coordinates.longitude ?? venue.longitude);
+  const { home } = getParticipants(event);
+  const city = address.city || address.cityName || venue.city || home.team?.location || '';
+  const country = address.country || venue.country || '';
+  return {
+    city: String(city || '').trim(),
+    country: String(country || '').trim(),
+    latitude: Number.isFinite(latitude) ? latitude : null,
+    longitude: Number.isFinite(longitude) ? longitude : null,
+    venue: venue.fullName || venue.displayName || ''
+  };
+}
+function weatherDescription(code, isDay = true) {
+  const value = Number(code);
+  if (!Number.isFinite(value)) return { icon: '🌤️', label: 'Clima disponible' };
+  if (value === 0) return { icon: isDay ? '☀️' : '🌙', label: isDay ? 'Despejado' : 'Despejado' };
+  if (value === 1) return { icon: isDay ? '🌤️' : '☁️', label: 'Mayormente despejado' };
+  if (value === 2) return { icon: '⛅', label: 'Parcialmente nublado' };
+  if (value === 3) return { icon: '☁️', label: 'Nublado' };
+  if (value === 45 || value === 48) return { icon: '🌫️', label: 'Niebla' };
+  if (value >= 51 && value <= 57) return { icon: '🌦️', label: 'Llovizna' };
+  if (value >= 61 && value <= 67) return { icon: '🌧️', label: 'Lluvia' };
+  if (value >= 71 && value <= 77) return { icon: '❄️', label: 'Nieve' };
+  if (value >= 80 && value <= 82) return { icon: '🌦️', label: 'Chaparrones' };
+  if (value >= 85 && value <= 86) return { icon: '🌨️', label: 'Chaparrones de nieve' };
+  if (value >= 95) return { icon: '⛈️', label: 'Tormenta' };
+  return { icon: '🌤️', label: 'Clima disponible' };
+}
+function weatherTargetHour(event, timeZone) {
+  return weatherTargetParts(event.date || getCompetition(event).date || Date.now(), timeZone);
+}
+function weatherHourlyIndex(weather, event) {
+  const hourly = weather?.hourly;
+  if (!hourly?.time?.length) return -1;
+  const timeZone = weather.timezone || TIME_ZONE;
+  const target = weatherTargetHour(event, timeZone);
+  let best = -1;
+  let bestDistance = Infinity;
+  hourly.time.forEach((value, index) => {
+    const date = String(value).slice(0, 10);
+    if (date !== target.date) return;
+    const hour = Number(String(value).slice(11, 13));
+    const distance = Math.abs(hour - Number(target.hour));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+  return best;
+}
+function weatherSnapshot(weather, event, location) {
+  const phase = matchState(event);
+  const useCurrent = phase !== 'upcoming';
+  const index = useCurrent ? -1 : weatherHourlyIndex(weather, event);
+  const temperature = index >= 0 ? weather.hourly?.temperature_2m?.[index] : weather.current?.temperature_2m;
+  const code = index >= 0 ? weather.hourly?.weather_code?.[index] : weather.current?.weather_code;
+  const precipitation = index >= 0 ? weather.hourly?.precipitation_probability?.[index] : null;
+  const isDay = index >= 0 ? true : weather.current?.is_day !== 0;
+  const condition = weatherDescription(code, isDay);
+  if (!Number.isFinite(Number(temperature)) || code == null) return null;
+  return {
+    icon: condition.icon,
+    label: condition.label,
+    temperature: Math.round(Number(temperature)),
+    precipitation: Number.isFinite(Number(precipitation)) ? Math.round(Number(precipitation)) : null,
+    mode: useCurrent ? 'AHORA' : 'AL INICIO',
+    city: location.city,
+    venue: location.venue
+  };
+}
+function renderWeatherCard(event) {
+  const id = String(event.id || '');
+  const entry = state.weather?.[id];
+  if (entry?.snapshot) {
+    const rain = entry.snapshot.precipitation != null && entry.snapshot.precipitation > 0
+      ? ' · ' + entry.snapshot.precipitation + '% lluvia' : '';
+    return '<div class="match-weather" title="' + safe(entry.snapshot.venue || entry.snapshot.city || 'Clima del partido') + '">'
+      + '<span class="weather-icon" aria-hidden="true">' + entry.snapshot.icon + '</span>'
+      + '<span class="weather-copy"><b>' + safe(entry.snapshot.temperature + '°C') + '</b><small>' + safe(entry.snapshot.mode + ' · ' + entry.snapshot.label + rain) + '</small></span></div>';
+  }
+  if (state.weatherLoading?.[id]) {
+    return '<div class="match-weather is-loading" aria-live="polite"><span class="weather-icon" aria-hidden="true">🌡️</span><span class="weather-copy"><b>—°C</b><small>BUSCANDO CLIMA</small></span></div>';
+  }
+  return '<div class="match-weather is-empty"><span class="weather-icon" aria-hidden="true">🌤️</span><span class="weather-copy"><b>—°C</b><small>CLIMA NO DISPONIBLE</small></span></div>';
+}
+async function loadMatchWeather(event) {
+  const id = String(event.id || '');
+  if (!id || state.weather?.[id] || state.weatherLoading?.[id]) return;
+  state.weatherLoading[id] = true;
+  if (state.selectedMatchId === id) renderMatches();
+  try {
+    const location = weatherLocationFromEvent(event);
+    let latitude = location.latitude, longitude = location.longitude, resolved = location;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      if (!location.city) throw new Error('El partido no tiene ciudad o estadio informado.');
+      const query = location.country ? location.city + ', ' + location.country : location.city;
+      const geocodeUrl = WEATHER_GEOCODING_BASE + '?name=' + encodeURIComponent(query) + '&count=1&language=es&format=json';
+      const geocode = await fetchJson(geocodeUrl);
+      const result = geocode?.results?.[0];
+      if (!result) throw new Error('No se encontró la ubicación del partido.');
+      latitude = Number(result.latitude);
+      longitude = Number(result.longitude);
+      resolved = { ...location, city: result.name || location.city, country: result.country || location.country };
+    }
+    const params = new URLSearchParams({
+      latitude: String(latitude), longitude: String(longitude),
+      current: 'temperature_2m,weather_code,is_day',
+      hourly: 'temperature_2m,weather_code,precipitation_probability',
+      forecast_days: '16', timezone: 'auto'
+    });
+    const weather = await fetchJson(WEATHER_FORECAST_BASE + '?' + params.toString());
+    const snapshot = weatherSnapshot(weather, event, resolved);
+    state.weather[id] = snapshot ? { snapshot, updatedAt: Date.now() } : { snapshot: null, updatedAt: Date.now() };
+  } catch (error) {
+    state.weather[id] = { snapshot: null, error: true, updatedAt: Date.now() };
+    console.warn('No se pudo cargar el clima del partido.', error);
+  } finally {
+    delete state.weatherLoading[id];
+    if (state.selectedMatchId === id) renderMatches();
+  }
+}
 function renderFollowControls(event) {
   const id = String(event.id || '');
   const followed = state.followedMatchIds.has(id);
   return '<div class="match-tools"><button type="button" class="follow-match-button ' + (followed ? 'active' : '') + '" data-follow-match="' + safe(id) + '">' + (followed ? '★ SIGUIENDO' : '☆ SEGUIR PARTIDO') + '</button>'
-    + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button></div>'
+    + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button>' + renderWeatherCard(event) + '</div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set() };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set(), weather: {}, weatherLoading: {} };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -1435,6 +1573,7 @@ function renderMatchDetails(event) {
   const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
   const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
   const phase = matchState(event);
+  if (!state.weather?.[String(event.id)] && !state.weatherLoading?.[String(event.id)]) loadMatchWeather(event);
   const lineups = extractMatchLineups(state.matchDetails, event);
   const substitutions = collectSubstitutions(state.matchDetails, event);
   const loading = state.matchDetailsLoading && !state.matchDetails;
@@ -2090,3 +2229,11 @@ window.setInterval(() => {
   loadTeamProfile(event, profile.teamId, profile.leagueId, request, true);
 }, 15 * 60_000);
 window.setInterval(() => { loadStandings(); }, 15 * 60_000);
+window.setInterval(() => {
+  const id = state.selectedMatchId;
+  if (!id) return;
+  const event = state.matches.find(item => String(item.id) === String(id));
+  if (!event || !state.weather?.[id]) return;
+  delete state.weather[id];
+  loadMatchWeather(event);
+}, 15 * 60_000);
