@@ -2351,7 +2351,7 @@ window.setInterval(() => {
 }, 15 * 60_000);
 window.setInterval(() => {
   if (!state.selectedMatchId) return;
-  const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+  const event = selectedEventRecord();
   if (!event) return;
   const id = String(event.id), finished = matchState(event) === 'finished';
   if (!finished || !state.finalDetailsLoadedFor.has(id)) {
