@@ -175,6 +175,104 @@ function renderAdvancedStats(event) {
     + (hasData ? '' : '<div class="detail-note">ESPN todavía no publicó estas estadísticas para el partido.</div>') + '</section>';
 }
 
+
+function headToHeadScore(competitor) {
+  const score = competitor?.score;
+  if (score && typeof score === 'object') return score.displayValue ?? score.value ?? '—';
+  return score == null ? '—' : score;
+}
+function headToHeadDate(event) {
+  const value = event?.date || getCompetition(event).date;
+  if (!value) return 'FECHA A CONFIRMAR';
+  return new Intl.DateTimeFormat('es-AR', { timeZone: TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric' })
+    .format(new Date(value)).replace(/\./g, '');
+}
+function headToHeadLogo(competitor, name) {
+  const team = competitor?.team || competitor || {};
+  const logo = team.logo || team.logos?.[0]?.href;
+  if (logo && /^https:\/\//i.test(logo)) return '<img class="head-to-head-logo" src="' + safe(logo) + '" alt="" loading="lazy">';
+  const initials = team.abbreviation || String(name || team.displayName || 'FC').split(/\s+/).map(word => word[0]).join('').slice(0, 3);
+  return '<span class="head-to-head-logo fallback">' + safe(initials) + '</span>';
+}
+function headToHeadLabel(event) {
+  const league = event?.league || {};
+  const seasonType = event?.seasonType || {};
+  return league.shortName || league.name || seasonType.name || 'PARTIDO';
+}
+function renderHeadToHead(event) {
+  const id = String(event.id || '');
+  const entry = state.headToHead?.[id];
+  const loading = state.headToHeadLoading?.[id];
+  let content = '';
+  if (loading && !entry) {
+    content = '<div class="detail-note">Buscando los enfrentamientos directos más recientes…</div>';
+  } else if (!entry?.matches?.length) {
+    content = '<div class="detail-note">No encontramos enfrentamientos directos recientes en los calendarios disponibles.</div>';
+  } else {
+    content = '<div class="head-to-head-list">' + entry.matches.map(previous => {
+      const { home, away } = getParticipants(previous);
+      const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
+      const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
+      const homeScore = headToHeadScore(home);
+      const awayScore = headToHeadScore(away);
+      const selected = String(state.selectedMatchId) === String(previous.id) ? ' is-selected' : '';
+      return '<button type="button" class="head-to-head-row' + selected + '" data-head-to-head-id="' + safe(previous.id) + '">'
+        + '<span class="head-to-head-date">' + safe(headToHeadDate(previous)) + '</span>'
+        + '<span class="head-to-head-match"><span class="head-to-head-team">' + headToHeadLogo(home, homeName) + '<b>' + safe(homeName) + '</b></span>'
+        + '<strong>' + safe(homeScore) + ' <i>–</i> ' + safe(awayScore) + '</strong>'
+        + '<span class="head-to-head-team away">' + headToHeadLogo(away, awayName) + '<b>' + safe(awayName) + '</b></span></span>'
+        + '<span class="head-to-head-meta"><small>' + safe(headToHeadLabel(previous)) + '</small><em>VER DETALLE ↗</em></span>'
+        + '</button>';
+    }).join('') + '</div>';
+  }
+  return '<section class="detail-section head-to-head"><div class="detail-section-title"><h4>CARA A CARA</h4><span>ÚLTIMOS ' + (entry?.matches?.length || 0) + '</span></div>'
+    + '<p class="head-to-head-caption">Enfrentamientos directos más recientes entre estos equipos</p>' + content + '</section>';
+}
+async function loadHeadToHead(event) {
+  const id = String(event.id || '');
+  if (!id || state.headToHead?.[id] || state.headToHeadLoading?.[id]) return;
+  state.headToHeadLoading[id] = true;
+  if (state.selectedMatchId === id) renderMatches();
+  try {
+    const { home, away } = getParticipants(event);
+    const homeId = String(home.team?.id || home.id || '');
+    const awayId = String(away.team?.id || away.id || '');
+    if (!homeId || !awayId) throw new Error('El partido no tiene identificadores de equipos.');
+    const league = LEAGUES.find(item => item.id === event._leagueId) || LEAGUES[0];
+    const targetDate = event.date || getCompetition(event).date || new Date().toISOString();
+    const targetYear = new Date(targetDate).getUTCFullYear();
+    const years = [...new Set([targetYear, targetYear - 1, targetYear - 2])];
+    const teamIds = [...new Set([homeId, awayId])];
+    const requests = teamIds.flatMap(teamId => years.map(year => fetchFromEspn('/' + league.path + '/teams/' + encodeURIComponent(teamId) + '/schedule?season=' + year + '&region=ar&lang=es&limit=100').catch(() => null)));
+    const payloads = await Promise.all(requests);
+    const cutoff = Date.parse(targetDate);
+    const matches = new Map();
+    payloads.filter(Boolean).forEach(payload => {
+      (Array.isArray(payload.events) ? payload.events : []).forEach(previous => {
+        const competitors = getCompetition(previous).competitors || [];
+        const ids = competitors.map(item => String(item.team?.id || item.id || ''));
+        const previousDate = Date.parse(previous.date || getCompetition(previous).date || '');
+        if (!ids.includes(homeId) || !ids.includes(awayId) || !Number.isFinite(previousDate) || previousDate >= cutoff || matchState(previous) !== 'finished') return;
+        const normalized = { ...previous, _leagueId: event._leagueId, _headToHead: true };
+        matches.set(String(previous.id), normalized);
+      });
+    });
+    const recent = [...matches.values()].sort((a, b) => Date.parse(b.date || '') - Date.parse(a.date || '')).slice(0, 6);
+    state.headToHead[id] = { matches: recent, updatedAt: Date.now() };
+    recent.forEach(previous => { state.headToHeadEvents[String(previous.id)] = previous; });
+  } catch (error) {
+    state.headToHead[id] = { matches: [], error: true, updatedAt: Date.now() };
+    console.warn('No se pudo cargar el cara a cara.', error);
+  } finally {
+    delete state.headToHeadLoading[id];
+    if (state.selectedMatchId === id) renderMatches();
+  }
+}
+function selectedEventRecord() {
+  const id = String(state.selectedMatchId || '');
+  return state.matches.find(item => String(item.id) === id) || state.headToHeadEvents?.[id] || null;
+}
+
 const WEATHER_FORECAST_BASE = 'https://api.open-meteo.com/v1/forecast';
 const WEATHER_GEOCODING_BASE = 'https://geocoding-api.open-meteo.com/v1/search';
 
@@ -319,7 +417,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button>' + renderWeatherCard(event) + '</div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set(), weather: {}, weatherLoading: {} };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set(), weather: {}, weatherLoading: {}, headToHead: {}, headToHeadLoading: {}, headToHeadEvents: {} };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -1574,6 +1672,7 @@ function renderMatchDetails(event) {
   const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
   const phase = matchState(event);
   if (!state.weather?.[String(event.id)] && !state.weatherLoading?.[String(event.id)]) loadMatchWeather(event);
+  if (!state.headToHead?.[String(event.id)] && !state.headToHeadLoading?.[String(event.id)]) loadHeadToHead(event);
   const lineups = extractMatchLineups(state.matchDetails, event);
   const substitutions = collectSubstitutions(state.matchDetails, event);
   const loading = state.matchDetailsLoading && !state.matchDetails;
@@ -1594,6 +1693,7 @@ function renderMatchDetails(event) {
   return '<aside class="match-details" aria-label="Detalle del partido">'
     + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
     + renderFollowControls(event) + renderAdvancedStats(event)
+    + renderHeadToHead(event)
     + renderPlayerRatings(event)
     + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
     + '<section class="detail-section"><div class="detail-section-title"><h4>CAMBIOS</h4><span>' + substitutions.length + '</span></div>' + substitutionsContent + '</section>'
@@ -1639,7 +1739,7 @@ function renderMatches() {
           : `<div class="empty-state">${safe(state.filter === 'all' ? `No hay partidos programados para ${feed.league.name} en esta fecha.` : labels[state.filter])}</div>`;
       const tableLink = `<a href="#tablas" data-table-league="${safe(feed.league.id)}">${feed.league.isCup ? 'VER LLAVES' : 'VER TABLA'} <span>↗</span></a>`;
       const anchor = feed.league.id === 'arg.1' ? ' id="ligas"' : '';
-      const selectedEvent = feedMatches.find(event => String(event.id) === String(state.selectedMatchId));
+      const selectedEvent = feedMatches.find(event => String(event.id) === String(state.selectedMatchId)) || (state.headToHeadEvents?.[String(state.selectedMatchId)]?._leagueId === feed.league.id ? state.headToHeadEvents[String(state.selectedMatchId)] : null);
       const detail = selectedEvent ? renderMatchDetails(selectedEvent) : '';
       return `<section class="competition-group ${selectedEvent ? 'has-details' : ''}"${anchor}><div class="league-heading"><span class="league-icon">${safe(feed.league.icon || '⚽')}</span><div><strong>${safe(feed.league.name)}</strong><small>${safe(seasonName)}</small></div>${tableLink}</div><div class="competition-matches">${content}</div>${detail}</section>`;
     }).join('') || `<div class="empty-state">${safe(labels[state.filter] || labels.all)}</div>`;
@@ -1698,6 +1798,49 @@ function renderMatches() {
       }
     });
   });
+
+  list.querySelectorAll('[data-head-to-head-id]').forEach(row => {
+    const openHeadToHead = () => {
+      const event = state.headToHeadEvents?.[row.dataset.headToHeadId];
+      if (!event) return;
+      if (state.selectedMatchId === String(event.id)) {
+        state.selectedMatchId = null;
+        state.matchDetails = null;
+        state.matchDetailsLoading = false;
+        state.matchDetailsError = false;
+        state.teamProfile = null;
+        state.teamProfileLoading = false;
+        state.teamProfileRequest += 1;
+        state.playerProfile = null;
+        state.playerProfileLoading = false;
+        state.playerProfileRequest += 1;
+        state.matchDetailRequest += 1;
+        renderMatches();
+        return;
+      }
+      state.selectedMatchId = String(event.id);
+      state.matchDetails = null;
+      state.matchDetailsLoading = true;
+      state.matchDetailsError = false;
+      state.teamProfile = null;
+      state.teamProfileLoading = false;
+      state.teamProfileRequest += 1;
+      state.playerProfile = null;
+      state.playerProfileLoading = false;
+      state.playerProfileRequest += 1;
+      state.matchDetailRequest += 1;
+      renderMatches();
+      loadMatchDetails(event, true);
+    };
+    row.addEventListener('click', openHeadToHead);
+    row.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openHeadToHead();
+      }
+    });
+  });
+
   list.querySelector('[data-close-match-details]')?.addEventListener('click', () => {
     state.selectedMatchId = null;
     state.matchDetails = null;
@@ -1720,7 +1863,7 @@ function renderMatches() {
   }));
   list.querySelector('[data-enable-alerts]')?.addEventListener('click', enableMatchAlerts);
   list.querySelectorAll('[data-player-profile]').forEach(button => button.addEventListener('click', () => {
-    const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+    const event = selectedEventRecord();
     if (event) openPlayerProfile(event, button);
   }));
   list.querySelectorAll('.player-profile-photo').forEach(image => image.addEventListener('error', () => image.remove()));
@@ -1731,7 +1874,7 @@ function renderMatches() {
     renderMatches();
   });
   list.querySelectorAll('[data-team-profile]').forEach(button => button.addEventListener('click', () => {
-    const event = state.matches.find(item => String(item.id) === state.selectedMatchId);
+    const event = selectedEventRecord();
     if (!event) return;
     const { home, away } = getParticipants(event);
     const competitor = button.dataset.teamProfile === 'home' ? home : away;
