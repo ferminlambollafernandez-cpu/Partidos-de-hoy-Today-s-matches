@@ -243,7 +243,7 @@ async function loadHeadToHead(event) {
     const targetYear = new Date(targetDate).getUTCFullYear();
     const years = [...new Set([targetYear, targetYear - 1, targetYear - 2])];
     const teamIds = [...new Set([homeId, awayId])];
-    const requests = teamIds.flatMap(teamId => years.map(year => fetchFromEspn('/' + league.path + '/teams/' + encodeURIComponent(teamId) + '/schedule?season=' + year + '&region=ar&lang=es&limit=100').catch(() => null)));
+    const requests = teamIds.flatMap(teamId => years.map(year => teamScheduleRequest(league, teamId, year)));
     const payloads = await Promise.all(requests);
     const cutoff = Date.parse(targetDate);
     const matches = new Map();
@@ -268,6 +268,127 @@ async function loadHeadToHead(event) {
     if (state.selectedMatchId === id) renderMatches();
   }
 }
+
+function teamScheduleRequest(league, teamId, year) {
+  const key = league.id + ':' + teamId + ':' + year;
+  if (state.schedulePromises?.[key]) return state.schedulePromises[key];
+  const path = '/' + league.path + '/teams/' + encodeURIComponent(teamId) + '/schedule?season=' + year + '&region=ar&lang=es&limit=100';
+  const request = fetchFromEspn(path).catch(() => null);
+  state.schedulePromises[key] = request;
+  return request;
+}
+function predictionScoreNumber(competitor) {
+  const value = Number(headToHeadScore(competitor));
+  return Number.isFinite(value) ? value : null;
+}
+function predictionSummary(rows) {
+  const ordered = [...rows].sort((a, b) => Date.parse(b.date || '') - Date.parse(a.date || ''));
+  const goalsFor = ordered.reduce((sum, item) => sum + item.goalsFor, 0);
+  const goalsAgainst = ordered.reduce((sum, item) => sum + item.goalsAgainst, 0);
+  const wins = ordered.filter(item => item.goalsFor > item.goalsAgainst).length;
+  const draws = ordered.filter(item => item.goalsFor === item.goalsAgainst).length;
+  const losses = ordered.filter(item => item.goalsFor < item.goalsAgainst).length;
+  const form = ordered.slice().reverse().map(item => item.goalsFor > item.goalsAgainst ? 'G' : item.goalsFor === item.goalsAgainst ? 'E' : 'P').join('') || '—';
+  return {
+    matches: ordered.length,
+    goalsFor,
+    goalsAgainst,
+    avgFor: ordered.length ? goalsFor / ordered.length : null,
+    avgAgainst: ordered.length ? goalsAgainst / ordered.length : null,
+    wins,
+    draws,
+    losses,
+    form
+  };
+}
+function predictionTeamData(payloads, teamId, targetDate, preferredSide) {
+  const rows = [];
+  payloads.filter(Boolean).forEach(payload => {
+    (Array.isArray(payload.events) ? payload.events : []).forEach(previous => {
+      const competition = getCompetition(previous);
+      const competitors = competition.competitors || [];
+      const team = competitors.find(item => String(item.team?.id || item.id || '') === String(teamId));
+      const opponent = competitors.find(item => String(item.team?.id || item.id || '') !== String(teamId));
+      const date = previous.date || competition.date;
+      const timestamp = Date.parse(date || '');
+      const goalsFor = predictionScoreNumber(team);
+      const goalsAgainst = predictionScoreNumber(opponent);
+      if (!team || !opponent || !Number.isFinite(timestamp) || timestamp >= Date.parse(targetDate) || matchState(previous) !== 'finished' || goalsFor === null || goalsAgainst === null) return;
+      rows.push({ id: String(previous.id), date, side: team.homeAway || '', goalsFor, goalsAgainst });
+    });
+  });
+  const unique = [...new Map(rows.map(item => [item.id, item])).values()].sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
+  const overall = predictionSummary(unique.slice(0, 8));
+  const contextualRows = unique.filter(item => item.side === preferredSide).slice(0, 5);
+  return { context: predictionSummary(contextualRows), overall, preferredSide };
+}
+function predictionExpectedGoals(home, away) {
+  const homeContext = home.context.matches >= 2 ? home.context : home.overall;
+  const awayContext = away.context.matches >= 2 ? away.context : away.overall;
+  const fallback = 1.2;
+  const homeAttack = homeContext.avgFor ?? fallback;
+  const homeDefense = homeContext.avgAgainst ?? fallback;
+  const awayAttack = awayContext.avgFor ?? fallback;
+  const awayDefense = awayContext.avgAgainst ?? fallback;
+  const homeExpected = homeAttack * 0.55 + awayDefense * 0.45 + 0.15;
+  const awayExpected = awayAttack * 0.55 + homeDefense * 0.45;
+  const clamp = value => Math.max(0, Math.min(5, Math.round(value)));
+  return { home: clamp(homeExpected), away: clamp(awayExpected), sample: Math.min(homeContext.matches, awayContext.matches), usesFallback: home.context.matches < 2 || away.context.matches < 2 };
+}
+function renderPredictionMetric(summary) {
+  return '<div class="prediction-team-stats"><span><b>' + safe(summary.form) + '</b><small>FORMA</small></span>'
+    + '<span><b>' + safe(summary.goalsFor + ' / ' + summary.goalsAgainst) + '</b><small>GF / GC</small></span>'
+    + '<span><b>' + safe(summary.matches ? summary.avgFor.toFixed(1) : '—') + '</b><small>GF/P</small></span>'
+    + '<span><b>' + safe(summary.matches ? summary.avgAgainst.toFixed(1) : '—') + '</b><small>GC/P</small></span></div>';
+}
+function renderPrediction(event) {
+  const id = String(event.id || '');
+  const entry = state.predictions?.[id];
+  const loading = state.predictionLoading?.[id];
+  if (loading && !entry) return '<section class="detail-section prediction-section"><div class="detail-section-title"><h4>PREDICCIÓN DE RESULTADO</h4><span>ANALIZANDO</span></div><div class="detail-note">Comparando los últimos partidos como local y visitante…</div></section>';
+  if (!entry?.prediction) return '<section class="detail-section prediction-section"><div class="detail-section-title"><h4>PREDICCIÓN DE RESULTADO</h4><span>ESTIMACIÓN</span></div><div class="detail-note">No hay suficientes resultados recientes para calcular una predicción.</div></section>';
+  const { home, away } = getParticipants(event);
+  const homeName = home.team?.shortDisplayName || home.team?.displayName || home.team?.name || 'Local';
+  const awayName = away.team?.shortDisplayName || away.team?.displayName || away.team?.name || 'Visitante';
+  const homeContext = entry.teams.home.context.matches >= 2 ? entry.teams.home.context : entry.teams.home.overall;
+  const awayContext = entry.teams.away.context.matches >= 2 ? entry.teams.away.context : entry.teams.away.overall;
+  const note = entry.prediction.usesFallback ? 'Se completó con la forma general porque faltan partidos suficientes en esa condición.' : 'Basada en los últimos partidos de local y visitante disponibles.';
+  return '<section class="detail-section prediction-section"><div class="detail-section-title"><h4>PREDICCIÓN DE RESULTADO</h4><span>ESTIMACIÓN</span></div>'
+    + '<div class="prediction-score"><span>' + safe(homeName) + '</span><strong>' + safe(entry.prediction.home + ' – ' + entry.prediction.away) + '</strong><span>' + safe(awayName) + '</span></div>'
+    + '<div class="prediction-teams"><article><b>' + safe(homeName) + ' · LOCAL</b>' + renderPredictionMetric(homeContext) + '</article><article><b>' + safe(awayName) + ' · VISITANTE</b>' + renderPredictionMetric(awayContext) + '</article></div>'
+    + '<p class="prediction-note">' + safe(note + ' Muestra: ' + entry.prediction.sample + ' partidos comparables. No es un resultado confirmado.') + '</p></section>';
+}
+async function loadPrediction(event) {
+  const id = String(event.id || '');
+  if (!id || state.predictions?.[id] || state.predictionLoading?.[id]) return;
+  state.predictionLoading[id] = true;
+  if (state.selectedMatchId === id) renderMatches();
+  try {
+    const { home, away } = getParticipants(event);
+    const homeId = String(home.team?.id || home.id || '');
+    const awayId = String(away.team?.id || away.id || '');
+    if (!homeId || !awayId) throw new Error('El partido no tiene identificadores de equipos.');
+    const league = LEAGUES.find(item => item.id === event._leagueId) || LEAGUES[0];
+    const targetDate = event.date || getCompetition(event).date || new Date().toISOString();
+    const targetYear = new Date(targetDate).getUTCFullYear();
+    const years = [...new Set([targetYear, targetYear - 1, targetYear - 2])];
+    const payloads = await Promise.all([
+      Promise.all(years.map(year => teamScheduleRequest(league, homeId, year))),
+      Promise.all(years.map(year => teamScheduleRequest(league, awayId, year)))
+    ]);
+    const homeData = predictionTeamData(payloads[0], homeId, targetDate, 'home');
+    const awayData = predictionTeamData(payloads[1], awayId, targetDate, 'away');
+    if (!homeData.overall.matches && !awayData.overall.matches) throw new Error('Sin resultados recientes.');
+    state.predictions[id] = { teams: { home: homeData, away: awayData }, prediction: predictionExpectedGoals(homeData, awayData), updatedAt: Date.now() };
+  } catch (error) {
+    state.predictions[id] = { prediction: null, error: true, updatedAt: Date.now() };
+    console.warn('No se pudo calcular la predicción.', error);
+  } finally {
+    delete state.predictionLoading[id];
+    if (state.selectedMatchId === id) renderMatches();
+  }
+}
+
 function selectedEventRecord() {
   const id = String(state.selectedMatchId || '');
   return state.matches.find(item => String(item.id) === id) || state.headToHeadEvents?.[id] || null;
@@ -417,7 +538,7 @@ function renderFollowControls(event) {
     + '<button type="button" class="alerts-button ' + (state.alertsEnabled ? 'active' : '') + '" data-enable-alerts>' + (state.alertsEnabled ? 'AVISOS ACTIVOS' : 'ACTIVAR AVISOS') + '</button>' + renderWeatherCard(event) + '</div>'
     + '<p class="alert-limit-note">Avisos disponibles mientras la página esté abierta.</p>';
 }
-const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set(), weather: {}, weatherLoading: {}, headToHead: {}, headToHeadLoading: {}, headToHeadEvents: {} };
+const state = { date: todayKey(), matches: [], feeds: [], tables: [], tableData: {}, activeStandings: 'arg.1', activeTable: 0, filter: 'all', season: null, scoresLoaded: false, selectedMatchId: null, matchDetails: null, matchDetailsLoading: false, matchDetailsError: false, matchDetailRequest: 0, teamProfile: null, teamProfileLoading: false, teamProfileTab: 'principal', teamProfileRequest: 0, playerProfile: null, playerProfileLoading: false, playerProfileRequest: 0, followedMatchIds: readFollowedMatches(), alertsEnabled: readLocalData(ALERTS_ENABLED_KEY, false), matchSnapshotsInitialized: false, detailSnapshots: {}, cardFetches: new Set(), finalDetailsLoadedFor: new Set(), weather: {}, weatherLoading: {}, headToHead: {}, headToHeadLoading: {}, headToHeadEvents: {}, predictions: {}, predictionLoading: {}, schedulePromises: {} };
 
 function dateParts(key) {
   const [year, month, day] = key.split('-').map(Number);
@@ -1673,6 +1794,7 @@ function renderMatchDetails(event) {
   const phase = matchState(event);
   if (!state.weather?.[String(event.id)] && !state.weatherLoading?.[String(event.id)]) loadMatchWeather(event);
   if (!state.headToHead?.[String(event.id)] && !state.headToHeadLoading?.[String(event.id)]) loadHeadToHead(event);
+  if (phase !== 'finished' && !state.predictions?.[String(event.id)] && !state.predictionLoading?.[String(event.id)]) loadPrediction(event);
   const lineups = extractMatchLineups(state.matchDetails, event);
   const substitutions = collectSubstitutions(state.matchDetails, event);
   const loading = state.matchDetailsLoading && !state.matchDetails;
@@ -1693,6 +1815,7 @@ function renderMatchDetails(event) {
   return '<aside class="match-details" aria-label="Detalle del partido">'
     + '<div class="detail-heading"><div><span>DETALLE DEL PARTIDO · ' + statusLabel + '</span><h3>' + homeLink + ' <b>vs</b> ' + awayLink + '</h3></div><button type="button" class="detail-close" data-close-match-details aria-label="Cerrar detalle">×</button></div>'
     + renderFollowControls(event) + renderAdvancedStats(event)
+    + (phase === 'finished' ? '' : renderPrediction(event))
     + renderHeadToHead(event)
     + renderPlayerRatings(event)
     + '<section class="detail-section"><div class="detail-section-title"><h4>ALINEACIONES</h4><span class="' + (lineups.confirmed ? 'confirmed' : '') + '">' + lineupStatus + '</span></div>' + lineupContent + '</section>'
@@ -2379,4 +2502,12 @@ window.setInterval(() => {
   if (!event || !state.weather?.[id]) return;
   delete state.weather[id];
   loadMatchWeather(event);
+}, 15 * 60_000);
+window.setInterval(() => {
+  const id = state.selectedMatchId;
+  if (!id) return;
+  const event = selectedEventRecord();
+  if (!event || matchState(event) === 'finished' || !state.predictions?.[id]) return;
+  delete state.predictions[id];
+  loadPrediction(event);
 }, 15 * 60_000);
